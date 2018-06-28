@@ -30,3 +30,7 @@ Session.vim
 .netrwhist
 # auto-generated tag files
 tags
+
+# Rust/Cargo
+/target/
+**/*.rs.bk

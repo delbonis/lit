@@ -1,0 +1,12 @@
+[package]
+name = "glit"
+version = "0.1.0"
+authors = ["Trey Del Bonis <j.delbonis.3@gmail.com>"]
+
+[dependencies]
+iui = "0.3"
+pkg-config = "*"
+
+[[bin]]
+name = "glit"
+path = "glit.rs"
