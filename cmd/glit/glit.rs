@@ -25,6 +25,7 @@ fn main() {
 	let ui = UI::init().expect("Couldn't initialize libui!");
 
 	let addr_bar = Entry::new(&ui);
+	// TODO set_read_only
 	let addr_button = Button::new(&ui, "New Address");
 	// TODO New address button logic.
 
@@ -37,6 +38,7 @@ fn main() {
 	let mut bal_group = Group::new(&ui, "baLanCes");
 	bal_group.set_title(&ui, " ");
 	let mut bal_box = VerticalBox::new(&ui);
+	bal_box.set_padded(&ui, true);
 
 	let bals = vec![
 		Balance::new(0, 1000, 5),
@@ -57,12 +59,14 @@ fn main() {
 	let empty_label = Label::new(&ui, "");
 
 	let mut send_hbox = HorizontalBox::new(&ui);
+	send_hbox.set_padded(&ui, true);
 	send_hbox.append(&ui, send_label, LayoutStrategy::Compact);
 	send_hbox.append(&ui, send_addr_box, LayoutStrategy::Stretchy);
 	send_hbox.append(&ui, send_amt_label, LayoutStrategy::Compact);
 	send_hbox.append(&ui, send_amt_box, LayoutStrategy::Stretchy);
 
 	let mut send_vbox = VerticalBox::new(&ui);
+	send_vbox.set_padded(&ui, true);
 	send_vbox.append(&ui, empty_label, LayoutStrategy::Compact);
 	send_vbox.append(&ui, send_button, LayoutStrategy::Compact);
 
@@ -71,6 +75,7 @@ fn main() {
 	//send_addr_box.set_title(&ui, "");
 
 	let mut recv_hbox = HorizontalBox::new(&ui);
+	recv_hbox.set_padded(&ui, true);
 	recv_hbox.append(&ui, addr_bar, LayoutStrategy::Stretchy);
 	recv_hbox.append(&ui, addr_button, LayoutStrategy::Compact);
 
