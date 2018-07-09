@@ -73,26 +73,29 @@ func (s *SPVCon) GetListOfNodes() ([]string, error) {
 }
 
 // DialNode receives a list of node ips and then tries to connect to them one by one.
-func (s *SPVCon) DialNode(listOfNodes []string) error {
+func (s *SPVCon) dialNode(listOfNodes []string) (net.Conn, error) {
 	// now have some IPs, go through and try to connect to one.
-	var err error
 	for _, ip := range listOfNodes {
 		// try to connect to all nodes in this range
-		var conString, conMode string
+		//var conString, conMode string
 		// need to check whether conString is ipv4 or ipv6
-		conString, conMode, err = s.parseRemoteNode(ip)
+		conString, conMode, err := s.parseRemoteNode(ip)
+		if err != nil {
+			log.Printf("parse error for node (skipped): %s", err)
+			continue
+		}
 		log.Printf("Attempting connection to node at %s\n",
 			conString)
-		s.con, err = net.Dial(conMode, conString)
+		con, err := net.Dial(conMode, conString)
 		if err == nil {
 			// great, we connected
-			return nil
+			return con, nil
 		} else {
 			log.Println(err)
 		}
 	}
 	// all nodes have been exhausted, we move on to the next one, if any.
-	return fmt.Errorf(" Tried to connect to all available node Addresses. Failed")
+	return nil, fmt.Errorf("Tried to connect to all available node addresses, failed")
 }
 
 func (s *SPVCon) Handshake(listOfNodes []string) error {
@@ -170,7 +173,7 @@ func (s *SPVCon) Handshake(listOfNodes []string) error {
 func (s *SPVCon) Connect(remoteNode string) error {
 	var err error
 	var listOfNodes []string
-	if lnutil.YupString(remoteNode) {
+	if lnutil.YupString(remoteNode) { // TODO Make this better.  Perhaps a "connection target"?
 		s.randomNodesOK = true
 		// if remoteNode is "yes" but no IP specified, use DNS seed
 		listOfNodes, err = s.GetListOfNodes()
@@ -184,8 +187,9 @@ func (s *SPVCon) Connect(remoteNode string) error {
 	}
 	handShakeFailed := false //need to be in this scope to access it here
 	connEstablished := false
+	var con net.Conn
 	for len(listOfNodes) != 0 {
-		err = s.DialNode(listOfNodes)
+		con, err = s.dialNode(listOfNodes)
 		if err != nil {
 			log.Println(err)
 			log.Printf("Couldn't dial node %s, Moving on", listOfNodes[0])
@@ -213,6 +217,7 @@ func (s *SPVCon) Connect(remoteNode string) error {
 			continue
 		}
 	}
+	s.con = con
 
 	if !handShakeFailed && !connEstablished {
 		// this case happens when user provided node fails to connect
