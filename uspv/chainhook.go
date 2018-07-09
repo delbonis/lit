@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 
 	"github.com/mit-dci/lit/btcutil/chaincfg/chainhash"
-	"github.com/mit-dci/lit/wire"
 	"github.com/mit-dci/lit/coinparam"
 	"github.com/mit-dci/lit/lnutil"
+	"github.com/mit-dci/lit/wire"
 )
 
 // ChainHook is an interface which provides access to a blockchain for the
@@ -22,6 +22,7 @@ is internal and not exported out to the wallit (eg a fullnode keeps track
 of a lot, and SPV node, somewhat less, and a block explorer shim basically nothing)
 */
 
+// ChainHook is a thing that lets you interact with the actual blockchains
 type ChainHook interface {
 
 	// Start turns on the ChainHook.  Later on, pass more parameters here.
@@ -84,6 +85,7 @@ type ChainHook interface {
 
 // --- implementation of ChainHook interface ----
 
+// Start ...
 func (s *SPVCon) Start(
 	startHeight int32, host, path string, params *coinparam.Params) (
 	chan lnutil.TxAndHeight, chan int32, error) {
@@ -129,6 +131,7 @@ func (s *SPVCon) Start(
 	return s.TxUpToWallit, s.CurrentHeightChan, nil
 }
 
+// RegisterAddress ...
 func (s *SPVCon) RegisterAddress(adr160 [20]byte) error {
 	s.TrackingAdrsMtx.Lock()
 	s.TrackingAdrs[adr160] = true
@@ -136,6 +139,7 @@ func (s *SPVCon) RegisterAddress(adr160 [20]byte) error {
 	return nil
 }
 
+// RegisterOutPoint ...
 func (s *SPVCon) RegisterOutPoint(op wire.OutPoint) error {
 	s.TrackingOPsMtx.Lock()
 	s.TrackingOPs[op] = true

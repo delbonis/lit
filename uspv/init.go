@@ -13,9 +13,10 @@ import (
 	"github.com/mit-dci/lit/wire"
 )
 
+// IP4 ...
 func IP4(ipAddress string) bool {
-	parseIp := net.ParseIP(ipAddress)
-	if parseIp.To4() == nil {
+	parseIP := net.ParseIP(ipAddress)
+	if parseIP.To4() == nil {
 		return false
 	}
 	return true
@@ -98,6 +99,7 @@ func (s *SPVCon) dialNode(listOfNodes []string) (net.Conn, error) {
 	return nil, fmt.Errorf("Tried to connect to all available node addresses, failed")
 }
 
+// Handshake ...
 func (s *SPVCon) Handshake(listOfNodes []string) error {
 	// assign version bits for local node
 	s.localVersion = VERSION
@@ -274,9 +276,9 @@ func (s *SPVCon) openHeaderFile(hfn string) error {
 			// if StartHeader is defined, start with hardcoded height
 			if s.Param.StartHeight != 0 {
 				hdr := s.Param.StartHeader
-				_, err := b.Write(hdr[:])
-				if err != nil {
-					return err
+				_, err2 := b.Write(hdr[:])
+				if err2 != nil {
+					return err2
 				}
 			} else {
 				err = s.Param.GenesisBlock.Header.Serialize(&b)

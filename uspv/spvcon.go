@@ -6,11 +6,12 @@ import (
 	"sync"
 
 	"github.com/mit-dci/lit/btcutil/chaincfg/chainhash"
-	"github.com/mit-dci/lit/wire"
 	"github.com/mit-dci/lit/coinparam"
 	"github.com/mit-dci/lit/lnutil"
+	"github.com/mit-dci/lit/wire"
 )
 
+// SPVCon is a SPV connection to a coin daemon.
 type SPVCon struct {
 	con net.Conn // the (probably tcp) connection to the node
 
@@ -75,6 +76,6 @@ type SPVCon struct {
 
 	// waitState is a channel that is empty while in the header and block
 	// sync modes, but when in the idle state has a "true" in it.
-	inWaitState chan bool
+	inWaitState   chan bool
 	randomNodesOK bool
 }
