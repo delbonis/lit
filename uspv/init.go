@@ -76,7 +76,7 @@ func (s *SPVCon) GetListOfNodes() ([]string, error) {
 func (s *SPVCon) DialNode(listOfNodes []string) error {
 	// now have some IPs, go through and try to connect to one.
 	var err error
-	for i, ip := range listOfNodes {
+	for _, ip := range listOfNodes {
 		// try to connect to all nodes in this range
 		var conString, conMode string
 		// need to check whether conString is ipv4 or ipv6
@@ -84,19 +84,15 @@ func (s *SPVCon) DialNode(listOfNodes []string) error {
 		log.Printf("Attempting connection to node at %s\n",
 			conString)
 		s.con, err = net.Dial(conMode, conString)
-		if err != nil {
-			if i != len(listOfNodes)-1 {
-				log.Println(err.Error())
-				continue
-			} else if i == len(listOfNodes)-1 {
-				log.Println(err)
-				// all nodes have been exhausted, we move on to the next one, if any.
-				return fmt.Errorf(" Tried to connect to all available node Addresses. Failed")
-			}
+		if err == nil {
+			// great, we connected
+			return nil
+		} else {
+			log.Println(err)
 		}
-		break
 	}
-	return nil
+	// all nodes have been exhausted, we move on to the next one, if any.
+	return fmt.Errorf(" Tried to connect to all available node Addresses. Failed")
 }
 
 func (s *SPVCon) Handshake(listOfNodes []string) error {
