@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 
 	"io/ioutil"
@@ -221,19 +222,25 @@ func (lc *litAfClient) Ls(textArgs []string) error {
 	}
 
 	if len(textArgs) == 0 {
-		fmt.Printf("pick one: conns, chans, addrs, txos, bals, dualfunds")
+		fmt.Printf("pick one: conns, chans, addrs, txos, bals, ports, dualfunds")
 		return nil
 	}
 
-	/*
-		pReply := new(litrpc.ListConnectionsReply)
-		cReply := new(litrpc.ChannelListReply)
-		aReply := new(litrpc.AddressReply)
-		tReply := new(litrpc.TxoListReply)
-		bReply := new(litrpc.BalanceReply)
-		lReply := new(litrpc.ListeningPortsReply)
-		dfReply := new(litrpc.PendingDualFundReply)
+	pReply := new(litrpc.ListConnectionsReply)
+	cReply := new(litrpc.ChannelListReply)
+	aReply := new(litrpc.AddressReply)
+	tReply := new(litrpc.TxoListReply)
+	bReply := new(litrpc.BalanceReply)
+	lReply := new(litrpc.ListeningPortsReply)
+	dfReply := new(litrpc.PendingDualFundReply)
 
+	cmd := textArgs[0]
+	all := false
+	if cmd == "-a" {
+		all = true
+	}
+
+	if cmd == "conns" || all {
 		err := lc.Call("LitRPC.ListConnections", nil, pReply)
 		if err != nil {
 			return err
@@ -245,7 +252,9 @@ func (lc *litAfClient) Ls(textArgs []string) error {
 					lnutil.White(peer.PeerNumber), peer.RemoteHost, peer.LitAdr)
 			}
 		}
+	}
 
+	if cmd == "chans" || all {
 		err = lc.Call("LitRPC.ChannelList", nil, cReply)
 		if err != nil {
 			return err
@@ -296,7 +305,9 @@ func (lc *litAfClient) Ls(textArgs []string) error {
 				lnutil.SatoshiColor(c.Capacity), lnutil.SatoshiColor(c.MyBalance),
 				c.Height, c.StateNum, c.Data, c.Pkh)
 		}
+	}
 
+	if cmd == "dualfunds" || all {
 		err = lc.Call("LitRPC.PendingDualFund", nil, dfReply)
 		if err != nil {
 			return err
@@ -311,7 +322,9 @@ func (lc *litAfClient) Ls(textArgs []string) error {
 				lnutil.Header("Req Amt:"), lnutil.SatoshiColor(dfReply.RequestedAmount),
 			)
 		}
+	}
 
+	if cmd == "txos" || all {
 		err = lc.Call("LitRPC.TxoList", nil, tReply)
 
 		if err != nil {
@@ -332,7 +345,9 @@ func (lc *litAfClient) Ls(textArgs []string) error {
 			}
 			fmt.Fprintf(color.Output, "\n")
 		}
+	}
 
+	if cmd == "ports" || all {
 		err = lc.Call("LitRPC.GetListeningPorts", nil, lReply)
 		if err != nil {
 			return err
@@ -343,7 +358,9 @@ func (lc *litAfClient) Ls(textArgs []string) error {
 				"Listening for connections on port(s) %v with key %s\n",
 				lnutil.White(lReply.LisIpPorts), lReply.Adr)
 		}
+	}
 
+	if cmd == "addrs" || all {
 		err = lc.Call("LitRPC.Address", nil, aReply)
 		if err != nil {
 			return err
@@ -353,7 +370,9 @@ func (lc *litAfClient) Ls(textArgs []string) error {
 			fmt.Fprintf(color.Output, "%d %s (%s)\n", i+1,
 				lnutil.Address(a), lnutil.Address(aReply.LegacyAddresses[i]))
 		}
+	}
 
+	if cmd == "bals" || all {
 		err = lc.Call("LitRPC.Balance", nil, bReply)
 		if err != nil {
 			return err
@@ -370,7 +389,8 @@ func (lc *litAfClient) Ls(textArgs []string) error {
 				lnutil.Header("Channel:"), lnutil.SatoshiColor(walBal.ChanTotal),
 			)
 		}
-	*/
+	}
+
 	return nil
 }
 
