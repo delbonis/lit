@@ -11,6 +11,7 @@ import (
 
 	"github.com/mit-dci/lit/lnutil"
 	"github.com/mit-dci/lit/wire"
+	"golang.org/x/net/proxy"
 )
 
 // IP4 ...
@@ -87,12 +88,29 @@ func (s *SPVCon) dialNode(listOfNodes []string) (net.Conn, error) {
 		}
 		log.Printf("Attempting connection to node at %s\n",
 			conString)
-		con, err := net.Dial(conMode, conString)
-		if err == nil {
-			// great, we connected
-			return con, nil
+    
+		if s.ProxyURL != "" {
+			log.Printf("Attempting to connect via proxy %s", s.ProxyURL)
+			var d proxy.Dialer
+			d, err = proxy.SOCKS5("tcp", s.ProxyURL, nil, proxy.Direct)
+			if err != nil {
+				return err
+			}
+
+			s.con, err = d.Dial(conMode, conString)
 		} else {
-			log.Println(err)
+			s.con, err = net.Dial(conMode, conString)
+		}
+
+		if err != nil {
+			if i != len(listOfNodes)-1 {
+				log.Println(err.Error())
+				continue
+			} else if i == len(listOfNodes)-1 {
+				log.Println(err)
+				// all nodes have been exhausted, we move on to the next one, if any.
+				return fmt.Errorf(" Tried to connect to all available node Addresses. Failed")
+			}
 		}
 	}
 	// all nodes have been exhausted, we move on to the next one, if any.
