@@ -74,11 +74,10 @@ func (s *SPVCon) GetListOfNodes() ([]string, error) {
 }
 
 // DialNode receives a list of node ips and then tries to connect to them one by one.
-func (s *SPVCon) dialNode(listOfNodes []string) (net.Conn, error) {
+func (s *SPVCon) DialNode(listOfNodes []string) (net.Conn, error) {
 	// now have some IPs, go through and try to connect to one.
 	for _, ip := range listOfNodes {
 		// try to connect to all nodes in this range
-		//var conString, conMode string
 		// need to check whether conString is ipv4 or ipv6
 		conString, conMode, err := s.parseRemoteNode(ip)
 		if err != nil {
@@ -191,7 +190,7 @@ func (s *SPVCon) Connect(remoteNode string) error {
 	connEstablished := false
 	var con net.Conn
 	for len(listOfNodes) != 0 {
-		con, err = s.dialNode(listOfNodes)
+		con, err = s.DialNode(listOfNodes)
 		if err != nil {
 			log.Println(err)
 			log.Printf("Couldn't dial node %s, Moving on", listOfNodes[0])
@@ -276,9 +275,9 @@ func (s *SPVCon) openHeaderFile(hfn string) error {
 			// if StartHeader is defined, start with hardcoded height
 			if s.Param.StartHeight != 0 {
 				hdr := s.Param.StartHeader
-				_, err2 := b.Write(hdr[:])
-				if err2 != nil {
-					return err2
+				_, err := b.Write(hdr[:])
+				if err != nil {
+					return err
 				}
 			} else {
 				err = s.Param.GenesisBlock.Header.Serialize(&b)
