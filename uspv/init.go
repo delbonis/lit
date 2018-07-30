@@ -76,6 +76,7 @@ func (s *SPVCon) GetListOfNodes() ([]string, error) {
 
 // DialNode receives a list of node ips and then tries to connect to them one by one.
 func (s *SPVCon) DialNode(listOfNodes []string) (net.Conn, error) {
+	var con net.Conn
 	// now have some IPs, go through and try to connect to one.
 	for _, ip := range listOfNodes {
 		// try to connect to all nodes in this range
@@ -85,31 +86,24 @@ func (s *SPVCon) DialNode(listOfNodes []string) (net.Conn, error) {
 			log.Printf("parse error for node (skipped): %s", err)
 			continue
 		}
-		log.Printf("Attempting connection to node at %s\n",
-			conString)
-    
+
+		log.Printf("Attempting connection to node at %s...", conString)
 		if s.ProxyURL != "" {
 			log.Printf("Attempting to connect via proxy %s", s.ProxyURL)
 			var d proxy.Dialer
 			d, err = proxy.SOCKS5("tcp", s.ProxyURL, nil, proxy.Direct)
 			if err != nil {
-				return err
+				return nil, err
 			}
 
-			s.con, err = d.Dial(conMode, conString)
+			con, err = d.Dial(conMode, conString)
 		} else {
-			s.con, err = net.Dial(conMode, conString)
+			con, err = net.Dial(conMode, conString)
 		}
 
-		if err != nil {
-			if i != len(listOfNodes)-1 {
-				log.Println(err.Error())
-				continue
-			} else if i == len(listOfNodes)-1 {
-				log.Println(err)
-				// all nodes have been exhausted, we move on to the next one, if any.
-				return fmt.Errorf(" Tried to connect to all available node Addresses. Failed")
-			}
+		if con != nil {
+			log.Printf("Connected to %s!", conString)
+			return con, nil
 		}
 	}
 	// all nodes have been exhausted, we move on to the next one, if any.
@@ -204,7 +198,7 @@ func (s *SPVCon) Connect(remoteNode string) error {
 	} else { // else connect to user-specified node
 		listOfNodes = []string{remoteNode}
 	}
-	handShakeFailed := false //need to be in this scope to access it here
+	handShakeFailed := false // need to be in this scope to access it here
 	connEstablished := false
 	var con net.Conn
 	for len(listOfNodes) != 0 {
@@ -236,7 +230,7 @@ func (s *SPVCon) Connect(remoteNode string) error {
 			continue
 		}
 	}
-	s.con = con
+	s.con = con // actually assign it.
 
 	if !handShakeFailed && !connEstablished {
 		// this case happens when user provided node fails to connect
