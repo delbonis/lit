@@ -203,6 +203,7 @@ func (s *SPVCon) Connect(remoteNode string) error {
 	var con net.Conn
 	for len(listOfNodes) != 0 {
 		con, err = s.DialNode(listOfNodes)
+		s.con = con
 		if err != nil {
 			log.Println(err)
 			log.Printf("Couldn't dial node %s, Moving on", listOfNodes[0])
@@ -230,7 +231,6 @@ func (s *SPVCon) Connect(remoteNode string) error {
 			continue
 		}
 	}
-	s.con = con // actually assign it.
 
 	if !handShakeFailed && !connEstablished {
 		// this case happens when user provided node fails to connect
