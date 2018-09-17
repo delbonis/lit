@@ -10,14 +10,16 @@ import (
 	"github.com/mit-dci/lit/logging"
 	"github.com/mit-dci/lit/portxo"
 
-	"github.com/mit-dci/lit/crypto/koblitz"
 	"github.com/mit-dci/lit/btcutil/chaincfg/chainhash"
+	"github.com/mit-dci/lit/crypto/koblitz"
 )
 
 // Uhh, quick channel.  For now.  Once you get greater spire it upgrades to
 // a full channel that can do everything.
 type Qchan struct {
 	// S for stored (on disk), D for derived
+
+	ChanState *QchanState
 
 	portxo.PorTxo            // S underlying utxo data
 	CloseData     QCloseData // S closing outpoint
@@ -50,53 +52,73 @@ type Qchan struct {
 
 }
 
+type QchanState struct {
+	Txo       portxo.PorTxo `json:"txo"`
+	CloseData QCloseData    `json:"closedata"`
+
+	MyPub    []byte `json:"mpub"`
+	TheirPub []byte `json:"opub"`
+
+	MyRefundPub    []byte `json:"mrpub"`
+	TheirRefundPub []byte `json:"orpub"`
+
+	WatchRefundAddr []byte `json:"wraddr"`
+
+	ElkSnd *elkrem.ElkremSender `json:"elks"`
+	ElkRcv *elkrem.ElkremSender `json:"elkr"`
+
+	Commitment *StatCom `json:"statecom"`
+
+	LastUpdate uint64 `json:"updated"`
+}
+
 // 4 + 1 + 8 + 32 + 4 + 33 + 33 + 1 + 5 + 32 + 64 = 217 bytes
 type HTLC struct {
-	Idx uint32
+	Idx uint32 `json:"idx"`
 
-	Incoming bool
-	Amt      int64
-	RHash    [32]byte
-	Locktime uint32
+	Incoming bool     `json:"incoming"`
+	Amt      int64    `json:"amt"`
+	RHash    [32]byte `json:"hash"`
+	Locktime uint32   `json:"locktime"`
 
-	MyHTLCBase    [33]byte
-	TheirHTLCBase [33]byte
+	MyHTLCBase    [33]byte `json:"mbase"`
+	TheirHTLCBase [33]byte `json:"obase"`
 
-	KeyGen portxo.KeyGen
+	KeyGen portxo.KeyGen `json:"keygen"`
 
-	Sig [64]byte
+	Sig [64]byte `json:"sig"`
 
-	R              [16]byte
-	Clearing       bool
-	Cleared        bool
-	ClearedOnChain bool // To keep track of what HTLCs we claimed on-chain
+	R              [16]byte `json:"preimage"`
+	Clearing       bool     `json:"clearing"`
+	Cleared        bool     `json:"cleared"`
+	ClearedOnChain bool     `json:"clearedchain"` // To keep track of what HTLCs we claimed on-chain
 }
 
 // StatComs are State Commitments.
 // all elements are saved to the db.
 type StatCom struct {
-	StateIdx uint64 // this is the n'th state commitment
+	StateIdx uint64 `json:"idx"` // this is the n'th state commitment
 
-	WatchUpTo uint64 // have sent out to watchtowers up to this state  ( < stateidx)
+	WatchUpTo uint64 `json:"watchidx"` // have sent out to watchtowers up to this state  ( < stateidx)
 
-	MyAmt int64 // my channel allocation
+	MyAmt int64 `json:"myamt"` // my channel allocation
 
-	Fee int64 // symmetric fee in absolute satoshis
+	Fee int64 `json:"fee"` // symmetric fee in absolute satoshis
 
-	Data [32]byte
+	Data [32]byte `json:"data"`
 
 	// their Amt is the utxo.Value minus this
-	Delta int32 // fund amount in-transit; is negative for the pusher
+	Delta int32 `json:"delta"` // fund amount in-transit; is negative for the pusher
 	// Delta for when the channel is in a collision state which needs to be resolved
-	Collision int32
+	Collision int32 `json:"collision"`
 
 	// Elkrem point from counterparty, used to make
 	// Homomorphic Adversarial Key Derivation public keys (HAKD)
-	ElkPoint     [33]byte // saved to disk, current revealable point
-	NextElkPoint [33]byte // Point stored for next state
-	N2ElkPoint   [33]byte // Point for state after next (in case of collision)
+	ElkPoint     [33]byte `json:"elk0"` // saved to disk, current revealable point
+	NextElkPoint [33]byte `json:"elk1"` // Point stored for next state
+	N2ElkPoint   [33]byte `json:"elk2"` // Point for state after next (in case of collision)
 
-	sig [64]byte // Counterparty's signature for current state
+	sig [64]byte `json:"sigother"` // Counterparty's signature for current state
 	// don't write to sig directly; only overwrite via fn() call
 
 	// note sig can be nil during channel creation. if stateIdx isn't 0,
@@ -104,26 +126,26 @@ type StatCom struct {
 	// only one sig is ever stored, to prevent broadcasting the wrong tx.
 	// could add a mutex here... maybe will later.
 
-	HTLCIdx       uint32
-	InProgHTLC    *HTLC // Current in progress HTLC
-	CollidingHTLC *HTLC // HTLC for when the channel is colliding
+	HTLCIdx       uint32 `json:"htlcidx"`
+	InProgHTLC    *HTLC  `json:"htlcinprog"`  // Current in progress HTLC
+	CollidingHTLC *HTLC  `json:"htlccollide"` // HTLC for when the channel is colliding
 
-	CollidingHashDelta     bool // True when colliding between a DeltaSig and HashSig/PreImageSig
-	CollidingHashPreimage  bool // True when colliding between HashSig and PreimageSig
-	CollidingPreimages     bool // True when colliding between PreimageSig and PreimageSig
-	CollidingPreimageDelta bool // True when colliding between a DeltaSig and HashSig/PreImageSig
+	CollidingHashDelta     bool `json:"collhd"` // True when colliding between a DeltaSig and HashSig/PreImageSig
+	CollidingHashPreimage  bool `json:"collhp"` // True when colliding between HashSig and PreimageSig
+	CollidingPreimages     bool `json:"collpp"` // True when colliding between PreimageSig and PreimageSig
+	CollidingPreimageDelta bool `json:"collpd"` // True when colliding between a DeltaSig and HashSig/PreImageSig
 
 	// Analogous to the ElkPoints above but used for generating their pubkey for the HTLC
-	NextHTLCBase [33]byte
-	N2HTLCBase   [33]byte
+	NextHTLCBase [33]byte `json:"htlcbasenext"`
+	N2HTLCBase   [33]byte `json:"htlcbasenext2"`
 
-	MyNextHTLCBase [33]byte
-	MyN2HTLCBase   [33]byte
+	MyNextHTLCBase [33]byte `json:"mhtlcbn"`
+	MyN2HTLCBase   [33]byte `json:"mhtlcbn2"`
 
 	// Any HTLCs associated with this channel state (can be nil)
-	HTLCs []HTLC
+	HTLCs []HTLC `json:"htlcs"`
 
-	Failed bool // S there was a fatal error with the channel
+	Failed bool `json:"failed"` // S there was a fatal error with the channel
 	// meaning it cannot be used safely
 }
 
@@ -136,9 +158,9 @@ type StatCom struct {
 type QCloseData struct {
 	// 3 txid / height pairs are stored.  All 3 only are used in the
 	// case where you grab their invalid close.
-	CloseTxid   chainhash.Hash
-	CloseHeight int32
-	Closed      bool // if channel is closed; if CloseTxid != -1
+	CloseTxid   chainhash.Hash `json:"txid"`
+	CloseHeight int32          `json:"height"`
+	Closed      bool           `json:"closed"` // if channel is closed; if CloseTxid != -1
 }
 
 // ChannelInfo prints info about a channel.
