@@ -38,7 +38,7 @@ func (nd *LitNode) AutoReconnect(listenPort string, interval int64, connectedCoi
 	coinMap := make(map[uint32][]uint32)
 	for _, qc := range qcs {
 		// make a map of all channel data with the key as coinType
-		coinMap[qc.Coin()] = append(coinMap[qc.Coin()], qc.KeyGen.Step[3]&0x7fffffff)
+		coinMap[qc.Coin()] = append(coinMap[qc.Coin()], qc.Coin())
 	}
 	for i, arr := range coinMap {
 		// remove duplicates in the map

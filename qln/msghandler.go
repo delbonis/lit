@@ -332,7 +332,7 @@ func (nd *LitNode) OPEventHandler(OPEventChan chan lnutil.OutPointEvent) {
 		}
 		var theQ *Qchan
 		for _, q := range qcs {
-			if lnutil.OutPointsEqual(q.Op, curOPEvent.Op) {
+			if lnutil.OutPointsEqual(q.ChanState.Txo.Op, curOPEvent.Op) {
 				theQ = q
 			}
 		}
@@ -408,7 +408,7 @@ func (nd *LitNode) OPEventHandler(OPEventChan chan lnutil.OutPointEvent) {
 		// confirmation event
 		if curOPEvent.Tx == nil {
 			logging.Infof("OP %s Confirmation event\n", curOPEvent.Op.String())
-			theQ.Height = curOPEvent.Height
+			theQ.ChanState.Txo.Height = curOPEvent.Height
 			err = nd.SaveQchanUtxoData(theQ)
 			if err != nil {
 				logging.Errorf("SaveQchanUtxoData error: %s", err.Error())
@@ -418,9 +418,9 @@ func (nd *LitNode) OPEventHandler(OPEventChan chan lnutil.OutPointEvent) {
 		} else {
 			logging.Infof("OP %s Spend event\n", curOPEvent.Op.String())
 			// mark channel as closed
-			theQ.CloseData.Closed = true
-			theQ.CloseData.CloseTxid = curOPEvent.Tx.TxHash()
-			theQ.CloseData.CloseHeight = curOPEvent.Height
+			theQ.ChanState.CloseData.Closed = true
+			theQ.ChanState.CloseData.CloseTxid = curOPEvent.Tx.TxHash()
+			theQ.ChanState.CloseData.CloseHeight = curOPEvent.Height
 			err = nd.SaveQchanUtxoData(theQ)
 			if err != nil {
 				logging.Errorf("SaveQchanUtxoData error: %s", err.Error())

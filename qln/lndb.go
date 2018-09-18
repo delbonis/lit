@@ -3,6 +3,7 @@ package qln
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -10,16 +11,13 @@ import (
 	"github.com/mit-dci/lit/logging"
 
 	"github.com/boltdb/bolt"
-	"github.com/mit-dci/lit/btcutil"
 	"github.com/mit-dci/lit/crypto/koblitz"
 	"github.com/mit-dci/lit/dlc"
-	"github.com/mit-dci/lit/elkrem"
 	"github.com/mit-dci/lit/eventbus"
 	"github.com/mit-dci/lit/lncore"
 	"github.com/mit-dci/lit/lndc"
 	"github.com/mit-dci/lit/lnp2p"
 	"github.com/mit-dci/lit/lnutil"
-	"github.com/mit-dci/lit/portxo"
 	"github.com/mit-dci/lit/watchtower"
 	"github.com/mit-dci/lit/wire"
 )
@@ -369,203 +367,14 @@ func (nd *LitNode) SaveNicknameForPeerIdx(nickname string, idx uint32) error {
 
 // SaveQchanUtxoData saves utxo data such as outpoint and close tx / status
 func (nd *LitNode) SaveQchanUtxoData(q *Qchan) error {
-	return nd.LitDB.Update(func(btx *bolt.Tx) error {
-		cbk := btx.Bucket(BKTChannel)
-		if cbk == nil {
-			return fmt.Errorf("no peers")
-		}
-
-		opArr := lnutil.OutPointToBytes(q.Op)
-
-		qcBucket := cbk.Bucket(opArr[:])
-		if qcBucket == nil {
-			return fmt.Errorf("outpoint %s not in db ", q.Op.String())
-		}
-
-		if q.CloseData.Closed {
-			closeBytes, err := q.CloseData.ToBytes()
-			if err != nil {
-				return err
-			}
-			err = qcBucket.Put(KEYqclose, closeBytes)
-			if err != nil {
-				return err
-			}
-		}
-
-		// serialize channel
-		qcBytes, err := q.ToBytes()
-		if err != nil {
-			return err
-		}
-
-		// save qchannel
-		return qcBucket.Put(KEYutxo, qcBytes)
-	})
+	logging.Warnf("someone called SaveQchanUtxoData, this is deprecated")
+	return nd.SaveQchanState(q)
 }
 
-// register a new Qchan in the db
-func (nd *LitNode) SaveQChan(q *Qchan) error {
-	if q == nil {
-		return fmt.Errorf("SaveQChan: nil qchan")
-	}
-
-	// save channel to db.  It has no state, and has no outpoint yet
-	err := nd.LitDB.Update(func(btx *bolt.Tx) error {
-
-		qOPArr := lnutil.OutPointToBytes(q.Op)
-
-		// make mapping of index to outpoint
-		cmp := btx.Bucket(BKTChanMap)
-		if cmp == nil {
-			return fmt.Errorf("SaveQChan: no channel map bucket")
-		}
-
-		// save index : outpoint
-		err := cmp.Put(lnutil.U32tB(q.Idx()), qOPArr[:])
-		if err != nil {
-			return err
-		}
-		logging.Infof("saved %d : %s mapping in db\n", q.Idx(), q.Op.String())
-
-		cbk := btx.Bucket(BKTChannel) // go into bucket for all peers
-		if cbk == nil {
-			return fmt.Errorf("SaveQChan: no channel bucket")
-		}
-
-		// make bucket for this channel
-
-		qcBucket, err := cbk.CreateBucket(qOPArr[:])
-		if qcBucket == nil || err != nil {
-			return fmt.Errorf("SaveQChan: can't make channel bucket")
-		}
-
-		// serialize channel
-		qcBytes, err := q.ToBytes()
-		if err != nil {
-			return err
-		}
-
-		// save qchannel in the bucket
-		err = qcBucket.Put(KEYutxo, qcBytes)
-		if err != nil {
-			return err
-		}
-
-		// also save all state; maybe there isn't any ..?
-		// serialize elkrem receiver if it exists
-
-		if q.ElkRcv != nil {
-			logging.Infof("--- elk rcv exists, saving\n")
-
-			eb, err := q.ElkRcv.ToBytes()
-			if err != nil {
-				return err
-			}
-			// save elkrem
-			err = qcBucket.Put(KEYElkRecv, eb)
-			if err != nil {
-				return err
-			}
-		}
-
-		// serialize state
-		b, err := q.State.ToBytes()
-		if err != nil {
-			return err
-		}
-		// save state
-		logging.Infof("writing %d byte state to bucket\n", len(b))
-		return qcBucket.Put(KEYState, b)
-	})
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// RestoreQchanFromBucket loads the full qchan into memory from the
-// bucket where it's stored.  Loads the channel info, the elkrems,
-// and the current state.
-// restore happens all at once, but saving to the db can happen
-// incrementally (updating states)
-// This should populate everything int he Qchan struct: the elkrems and the states.
-// Elkrem sender always works; is derived from local key data.
-// Elkrem receiver can be "empty" with nothing in it (no data in db)
-func (nd *LitNode) RestoreQchanFromBucket(bkt *bolt.Bucket) (*Qchan, error) {
-	if bkt == nil { // can't do anything without a bucket
-		return nil, fmt.Errorf("empty qchan bucket ")
-	}
-
-	// load the serialized channel base description
-	qc, err := QchanFromBytes(bkt.Get(KEYutxo))
-	if err != nil {
-		logging.Errorf("Error decoding Qchan: %s", err.Error())
-		return nil, err
-	}
-	qc.CloseData, err = QCloseFromBytes(bkt.Get(KEYqclose))
-	if err != nil {
-		logging.Errorf("Error decoding QClose: %s", err.Error())
-		return nil, err
-	}
-
-	// get my channel pubkey
-	qc.MyPub, _ = nd.GetUsePub(qc.KeyGen, UseChannelFund)
-
-	// derive my refund / base point from index
-	qc.MyRefundPub, _ = nd.GetUsePub(qc.KeyGen, UseChannelRefund)
-	qc.MyHAKDBase, _ = nd.GetUsePub(qc.KeyGen, UseChannelHAKDBase)
-
-	// derive my watchtower refund PKH
-	watchRefundPub, _ := nd.GetUsePub(qc.KeyGen, UseChannelWatchRefund)
-	watchRefundPKHslice := btcutil.Hash160(watchRefundPub[:])
-	copy(qc.WatchRefundAdr[:], watchRefundPKHslice)
-
-	qc.State = new(StatCom)
-
-	// load state.  If it exists.
-	// if it doesn't, leave as empty state, will fill in
-	stBytes := bkt.Get(KEYState)
-	if stBytes != nil {
-		qc.State, err = StatComFromBytes(stBytes)
-		if err != nil {
-			logging.Errorf("Error loading StatCom: %s", err.Error())
-			return nil, err
-		}
-	}
-
-	// load elkrem from elkrem bucket.
-	// shouldn't error even if nil.  So shouldn't error, ever.  Right?
-	// ignore error?
-	qc.ElkRcv, err = elkrem.ElkremReceiverFromBytes(bkt.Get(KEYElkRecv))
-	if err != nil {
-		return nil, err
-	}
-	if qc.ElkRcv != nil {
-		// logging.Infof("loaded elkrem receiver at state %d\n", qc.ElkRcv.UpTo())
-	}
-
-	// derive elkrem sender root from HD keychain
-	r, _ := nd.GetElkremRoot(qc.KeyGen)
-	// set sender
-	qc.ElkSnd = elkrem.NewElkremSender(r)
-
-	// make the clear to send chan
-	qc.ClearToSend = make(chan bool, 1)
-	// set it to true (all qchannels start as clear to send in ram
-	// maybe they shouldn't be...?
-	qc.ClearToSend <- true
-
-	return &qc, nil
-}
-
-// ReloadQchan loads updated data from the db into the qchan.  Loads elkrem
-// and state, but does not change qchan info itself.  Faster than GetQchan()
-// also reload the channel close state
+// ReloadQchan loads updated data from the db into the qchan.  Preserves the
+// clear to send state, delay, and channel mutex.
 func (nd *LitNode) ReloadQchanState(q *Qchan) error {
-	var err error
-	opArr := lnutil.OutPointToBytes(q.Op)
+	opArr := lnutil.OutPointToBytes(q.ChanState.Txo.Op)
 
 	return nd.LitDB.View(func(btx *bolt.Tx) error {
 		cbk := btx.Bucket(BKTChannel)
@@ -573,80 +382,19 @@ func (nd *LitNode) ReloadQchanState(q *Qchan) error {
 			return fmt.Errorf("no channels")
 		}
 
-		qcBucket := cbk.Bucket(opArr[:])
-		if qcBucket == nil {
-			return fmt.Errorf("outpoint %s not in db", q.Op.String())
+		v := cbk.Get(opArr[:])
+		if v == nil {
+			return fmt.Errorf("could not find channel")
 		}
 
-		// load state and update
-		// if it doesn't, leave as empty state, will fill in
-		stBytes := qcBucket.Get(KEYState)
-		if stBytes == nil {
-			return fmt.Errorf("state value empty")
-		}
-		nd.RemoteMtx.Lock()
-		q.State, err = StatComFromBytes(stBytes)
-		nd.RemoteMtx.Unlock()
+		nqs, err := QchanStateFromBytes(v)
 		if err != nil {
 			return err
 		}
 
-		q.CloseData, err = QCloseFromBytes(qcBucket.Get(KEYqclose))
-		if err != nil {
-			return err
-		}
+		q.ChanState = nqs
 
-		txoBytes := qcBucket.Get(KEYutxo)
-		if txoBytes == nil {
-			return fmt.Errorf("utxo value empty")
-		}
-		u, err := portxo.PorTxoFromBytes(txoBytes[107:])
-		if err != nil {
-			return err
-		}
-
-		q.PorTxo = *u // assign the utxo
-
-		// load elkrem from elkrem bucket.
-		q.ElkRcv, err = elkrem.ElkremReceiverFromBytes(qcBucket.Get(KEYElkRecv))
-		if err != nil {
-			return err
-		}
 		return nil
-	})
-}
-
-// SetQchanRefund overwrites "theirrefund" and "theirHAKDbase" in a qchan.
-//   This is needed after getting a chanACK.
-func (nd *LitNode) SetQchanRefund(q *Qchan, refund, hakdBase [33]byte) error {
-	return nd.LitDB.Update(func(btx *bolt.Tx) error {
-		cbk := btx.Bucket(BKTChannel)
-		if cbk == nil {
-			return fmt.Errorf("no channels")
-		}
-
-		opArr := lnutil.OutPointToBytes(q.Op)
-		qcBucket := cbk.Bucket(opArr[:])
-		if qcBucket == nil {
-			return fmt.Errorf("outpoint %s not in db ", q.Op.String())
-		}
-
-		// load the serialized channel base description
-		qc, err := QchanFromBytes(qcBucket.Get(KEYutxo))
-		if err != nil {
-			return err
-		}
-		// modify their refund
-		qc.TheirRefundPub = refund
-		// modify their HAKDbase
-		qc.TheirHAKDBase = hakdBase
-		// re -serialize
-		qcBytes, err := qc.ToBytes()
-		if err != nil {
-			return err
-		}
-		// save/overwrite
-		return qcBucket.Put(KEYutxo, qcBytes)
 	})
 }
 
@@ -655,35 +403,16 @@ func (nd *LitNode) SetQchanRefund(q *Qchan, refund, hakdBase [33]byte) error {
 // if we can make that it's own function.  Get channel bucket maybe?  But then
 // you have to close it...
 func (nd *LitNode) SaveQchanState(q *Qchan) error {
+	opArr := lnutil.OutPointToBytes(q.ChanState.Txo.Op)
+	statebuf := q.ChanState.Bytes()
+
 	return nd.LitDB.Update(func(btx *bolt.Tx) error {
 		cbk := btx.Bucket(BKTChannel)
 		if cbk == nil {
 			return fmt.Errorf("no channels")
 		}
 
-		opArr := lnutil.OutPointToBytes(q.Op)
-		qcBucket := cbk.Bucket(opArr[:])
-		if qcBucket == nil {
-			return fmt.Errorf("outpoint %s not in db ", q.Op.String())
-		}
-		// serialize elkrem receiver
-		eb, err := q.ElkRcv.ToBytes()
-		if err != nil {
-			return err
-		}
-		// save elkrem
-		err = qcBucket.Put(KEYElkRecv, eb)
-		if err != nil {
-			return err
-		}
-		// serialize state
-		b, err := q.State.ToBytes()
-		if err != nil {
-			return err
-		}
-		// save state
-		logging.Infof("writing %d byte state to bucket\n", len(b))
-		return qcBucket.Put(KEYState, b)
+		return cbk.Put(opArr[:], statebuf)
 	})
 }
 
@@ -695,23 +424,19 @@ func (nd *LitNode) GetAllQchans() ([]*Qchan, error) {
 		if cbk == nil {
 			return fmt.Errorf("no channels")
 		}
-		return cbk.ForEach(func(op, nothin []byte) error {
-			if nothin != nil {
-				return nil // non-bucket
-			}
-			qcBucket := cbk.Bucket(op)
-			if qcBucket == nil {
-				return nil // nothing stored
-			}
-			newQc, err := nd.RestoreQchanFromBucket(qcBucket)
+		return cbk.ForEach(func(op, buf []byte) error {
+
+			nqcs := QchanState{}
+			err := json.Unmarshal(buf, &nqcs)
 			if err != nil {
 				return err
 			}
 
-			// add to slice
-			qChans = append(qChans, newQc)
-			return nil
+			// TODO Import other extra data from BKTChannelEx.
 
+			// add to slice
+			qChans = append(qChans, NewQchanFromState(nqcs))
+			return nil
 		})
 	})
 	if err != nil {
@@ -726,28 +451,28 @@ func (nd *LitNode) GetQchan(opArr [36]byte) (*Qchan, error) {
 
 	qc := new(Qchan)
 	var err error
-	op := lnutil.OutPointFromBytes(opArr)
+
 	err = nd.LitDB.View(func(btx *bolt.Tx) error {
 		cbk := btx.Bucket(BKTChannel)
 		if cbk == nil {
 			return fmt.Errorf("no channels")
 		}
 
-		qcBucket := cbk.Bucket(opArr[:])
-		if qcBucket == nil {
-			return fmt.Errorf("outpoint %s not in db", op.String())
+		buf := cbk.Get(opArr[:])
+		if buf == nil {
+			return fmt.Errorf("channel not found")
 		}
 
-		qc, err = nd.RestoreQchanFromBucket(qcBucket)
+		err := json.Unmarshal(buf, qc)
 		if err != nil {
 			return err
 		}
+
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-
 	return qc, nil
 }
 

@@ -3,9 +3,9 @@ package qln
 import (
 	"fmt"
 
-	"github.com/mit-dci/lit/crypto/koblitz"
 	"github.com/mit-dci/lit/btcutil/chaincfg/chainhash"
 	"github.com/mit-dci/lit/coinparam"
+	"github.com/mit-dci/lit/crypto/koblitz"
 	"github.com/mit-dci/lit/lnutil"
 	"github.com/mit-dci/lit/portxo"
 	"github.com/mit-dci/lit/uspv"
@@ -121,6 +121,12 @@ func (nd *LitNode) GetUsePub(k portxo.KeyGen, use uint32) (pubArr [33]byte, err 
 	pub := nd.SubWallet[coin].GetPub(k)
 	copy(pubArr[:], pub.SerializeCompressed())
 	return
+}
+
+// GetUsePubSlice is just the above but returns a slice of bytes.
+func (nd *LitNode) GetUsePubSlice(k portxo.KeyGen, use uint32) ([]byte, error) {
+	arr, err := nd.GetUsePub(k, use)
+	return arr[:], err
 }
 
 // GetElkremRoot returns the Elkrem root for a given key path

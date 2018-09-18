@@ -111,14 +111,19 @@ func (w *WatchTower) BuildJusticeTx(
 	// to do so, generate Pubkeys for the script
 
 	// timeout key is the attacker's base point ez-added with the elk-point
-	TimeoutKey := lnutil.AddPubsEZ(wd.AdversaryBasePoint, elkPoint)
+	tk33 := [33]byte{}
+	timeoutKey := lnutil.AddPubsEZ(wd.AdversaryBasePoint[:], elkPoint[:])
+	copy(tk33[:], timeoutKey)
 
 	// revocable key is the customer's base point combined with same elk-point
-	Revkey := lnutil.CombinePubs(wd.CustomerBasePoint, elkPoint)
+	rk33 := [33]byte{}
+	revkey := lnutil.CombinePubs(wd.CustomerBasePoint[:], elkPoint[:])
+	copy(rk33[:], revkey) // FIXME
 
-	logging.Infof("tower build revpub %x \ntimeoutpub %x\n", Revkey, TimeoutKey)
+	logging.Infof("tower build revpub %x \ntimeoutpub %x\n", rk33, timeoutKey)
+
 	// build script from the two combined pubkeys and the channel delay
-	script := lnutil.CommitScript(Revkey, TimeoutKey, wd.Delay)
+	script := lnutil.CommitScript(rk33, tk33, wd.Delay)
 
 	// get P2WSH output script
 	shOutputScript := lnutil.P2WSHify(script)

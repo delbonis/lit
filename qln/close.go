@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mit-dci/lit/crypto/koblitz"
 	"github.com/mit-dci/lit/btcutil/chaincfg/chainhash"
 	"github.com/mit-dci/lit/btcutil/txscript"
 	"github.com/mit-dci/lit/crypto/fastsha256"
+	"github.com/mit-dci/lit/crypto/koblitz"
 	"github.com/mit-dci/lit/lnutil"
 	"github.com/mit-dci/lit/logging"
 	"github.com/mit-dci/lit/portxo"
@@ -37,15 +37,14 @@ func (nd *LitNode) CoopClose(q *Qchan) error {
 		return fmt.Errorf("not connected to peer %d ", q.Peer())
 	}
 
-	if q.CloseData.Closed {
-		return fmt.Errorf("can't close (%d,%d): already closed",
-			q.KeyGen.Step[3]&0x7fffffff, q.KeyGen.Step[4]&0x7fffffff)
+	if q.ChanState.CloseData.Closed {
+		return fmt.Errorf("can't close (%d,%d): already closed", q.Peer(), q.Idx())
 	}
 
-	for _, h := range q.State.HTLCs {
+	for _, h := range q.ChanState.Commitment.HTLCs {
 		if !h.Cleared {
 			return fmt.Errorf("can't close (%d,%d): there are uncleared HTLCs",
-				q.KeyGen.Step[3]&0x7fffffff, q.KeyGen.Step[4]&0x7fffffff)
+				q.Peer(), q.Idx())
 		}
 	}
 
@@ -65,9 +64,9 @@ func (nd *LitNode) CoopClose(q *Qchan) error {
 	// save channel state as closed.  We know the txid... even though that
 	// txid may not actually happen.
 	nd.RemoteMtx.Lock()
-	q.LastUpdate = uint64(time.Now().UnixNano() / 1000)
-	q.CloseData.Closed = true
-	q.CloseData.CloseTxid = tx.TxHash()
+	q.ChanState.LastUpdate = uint64(time.Now().UnixNano() / 1000)
+	q.ChanState.CloseData.Closed = true
+	q.ChanState.CloseData.CloseTxid = tx.TxHash()
 	nd.RemoteMtx.Unlock()
 	err = nd.SaveQchanUtxoData(q)
 	if err != nil {
@@ -81,7 +80,7 @@ func (nd *LitNode) CoopClose(q *Qchan) error {
 	// Should save something, just so the UI marks it as closed, and
 	// we don't accept payments on this channel anymore.
 
-	outMsg := lnutil.NewCloseReqMsg(q.Peer(), q.Op, signature)
+	outMsg := lnutil.NewCloseReqMsg(q.Peer(), q.ChanState.Txo.Op, signature)
 
 	nd.tmpSendLitMsg(outMsg)
 	return nil
@@ -105,10 +104,10 @@ func (nd *LitNode) CloseReqHandler(msg lnutil.CloseReqMsg) {
 		logging.Errorf("Not connected to coin type %d\n", q.Coin())
 	}
 
-	for _, h := range q.State.HTLCs {
+	for _, h := range q.ChanState.Commitment.HTLCs {
 		if !h.Cleared {
 			logging.Errorf("can't close (%d,%d): there are uncleared HTLCs",
-				q.KeyGen.Step[3]&0x7fffffff, q.KeyGen.Step[4]&0x7fffffff)
+				q.Peer(), q.Idx())
 			return
 		}
 	}
@@ -125,7 +124,12 @@ func (nd *LitNode) CloseReqHandler(msg lnutil.CloseReqMsg) {
 
 	hCache := txscript.NewTxSigHashes(tx)
 
-	pre, _, err := lnutil.FundTxScript(q.MyPub, q.TheirPub)
+	// FIXME
+	mp33 := [33]byte{}
+	copy(mp33[:], q.ChanState.MyPub)
+	opub33 := [33]byte{}
+	copy(opub33[:], q.ChanState.TheirPub)
+	pre, _, err := lnutil.FundTxScript(mp33, opub33)
 	if err != nil {
 		logging.Errorf("CloseReqHandler Sig err %s", err.Error())
 		return
@@ -138,7 +142,7 @@ func (nd *LitNode) CloseReqHandler(msg lnutil.CloseReqMsg) {
 	}
 	// always sighash all
 	hash := txscript.CalcWitnessSignatureHash(
-		parsed, hCache, txscript.SigHashAll, tx, 0, q.Value)
+		parsed, hCache, txscript.SigHashAll, tx, 0, q.ChanState.Txo.Value)
 
 	theirBigSig := sig64.SigDecompress(msg.Signature)
 
@@ -148,7 +152,7 @@ func (nd *LitNode) CloseReqHandler(msg lnutil.CloseReqMsg) {
 		logging.Errorf("CloseReqHandler Sig err %s", err.Error())
 		return
 	}
-	theirPubKey, err := koblitz.ParsePubKey(q.TheirPub[:], koblitz.S256())
+	theirPubKey, err := koblitz.ParsePubKey(q.ChanState.TheirPub[:], koblitz.S256())
 	if err != nil {
 		logging.Errorf("CloseReqHandler Sig err %s", err.Error())
 		return
@@ -173,7 +177,7 @@ func (nd *LitNode) CloseReqHandler(msg lnutil.CloseReqMsg) {
 	myBigSig = append(myBigSig, byte(txscript.SigHashAll))
 	theirBigSig = append(theirBigSig, byte(txscript.SigHashAll))
 
-	pre, swap, err := lnutil.FundTxScript(q.MyPub, q.TheirPub)
+	pre, swap, err := lnutil.FundTxScript(mp33, opub33)
 	if err != nil {
 		logging.Errorf("CloseReqHandler FundTxScript err %s", err.Error())
 		return
@@ -189,9 +193,9 @@ func (nd *LitNode) CloseReqHandler(msg lnutil.CloseReqMsg) {
 
 	// save channel state to db as closed.
 	nd.RemoteMtx.Lock()
-	q.LastUpdate = uint64(time.Now().UnixNano() / 1000)
-	q.CloseData.Closed = true
-	q.CloseData.CloseTxid = tx.TxHash()
+	q.ChanState.LastUpdate = uint64(time.Now().UnixNano() / 1000)
+	q.ChanState.CloseData.Closed = true
+	q.ChanState.CloseData.CloseTxid = tx.TxHash()
 	nd.RemoteMtx.Unlock()
 	err = nd.SaveQchanUtxoData(q)
 	if err != nil {
@@ -213,7 +217,7 @@ func (q *Qchan) GetHtlcTxosWithElkPointsAndRevPub(tx *wire.MsgTx, mine bool, the
 	htlcOutsInTx := make([]*wire.TxOut, 0)
 	htlcOutIndexesInTx := make([]uint32, 0)
 	htlcOuts := make([]*wire.TxOut, 0)
-	for _, h := range q.State.HTLCs {
+	for _, h := range q.ChanState.Commitment.HTLCs {
 		txOut, err := q.GenHTLCOutWithElkPointsAndRevPub(h, mine, theirElkPoint, myElkPoint, revPub)
 		if err != nil {
 			return nil, nil, err
@@ -246,12 +250,14 @@ func (q *Qchan) GetHtlcTxos(tx *wire.MsgTx, mine bool) ([]*wire.TxOut, []uint32,
 		return nil, nil, err
 	}
 
-	curElk, err := q.ElkPoint(false, q.State.StateIdx)
+	curElk, err := q.ElkPoint(false, q.ChanState.Commitment.StateIdx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return q.GetHtlcTxosWithElkPointsAndRevPub(tx, mine, q.State.ElkPoint, curElk, revPub)
+	revp33 := [33]byte{}
+	copy(revp33[:], revPub)
+	return q.GetHtlcTxosWithElkPointsAndRevPub(tx, mine, q.ChanState.Commitment.ElkPoint, curElk, revp33)
 }
 
 // GetCloseTxos takes in a tx and sets the QcloseTXO fields based on the tx.
@@ -264,14 +270,18 @@ func (q *Qchan) GetCloseTxos(tx *wire.MsgTx) ([]portxo.PorTxo, error) {
 	}
 	txid := tx.TxHash()
 	// double check -- does this tx actually close the channel?
-	if !(len(tx.TxIn) == 1 && lnutil.OutPointsEqual(tx.TxIn[0].PreviousOutPoint, q.Op)) {
+	if !(len(tx.TxIn) == 1 && lnutil.OutPointsEqual(tx.TxIn[0].PreviousOutPoint, q.ChanState.Txo.Op)) {
 		return nil, fmt.Errorf("tx %s doesn't spend channel outpoint %s",
-			txid.String(), q.Op.String())
+			txid.String(), q.ChanState.Txo.Op.String())
 	}
 	var shIdx, pkhIdx uint32
 	var pkhIsMine bool
 	cTxos := make([]portxo.PorTxo, 1)
-	myPKHPkSript := lnutil.DirectWPKHScript(q.MyRefundPub)
+
+	// FIXME
+	mp33 := [33]byte{}
+	copy(mp33[:], q.ChanState.MyRefundPub)
+	myPKHPkSript := lnutil.DirectWPKHScript(mp33)
 
 	htlcOutsInTx, htlcOutIndexesInTx, err := q.GetHtlcTxos(tx, false)
 	if err != nil {
@@ -315,9 +325,9 @@ func (q *Qchan) GetCloseTxos(tx *wire.MsgTx) ([]portxo.PorTxo, error) {
 
 		pkhTxo.Op.Hash = txid
 		pkhTxo.Op.Index = pkhIdx
-		pkhTxo.Height = q.CloseData.CloseHeight
+		pkhTxo.Height = q.ChanState.CloseData.CloseHeight
 		// keypath same, use different
-		pkhTxo.KeyGen = q.KeyGen
+		pkhTxo.KeyGen = q.ChanState.Txo.KeyGen
 		// same keygen as underlying channel, but use is refund
 		pkhTxo.KeyGen.Step[2] = UseChannelRefund
 
@@ -336,25 +346,31 @@ func (q *Qchan) GetCloseTxos(tx *wire.MsgTx) ([]portxo.PorTxo, error) {
 	} else {
 		comNum = GetStateIdxFromTx(tx, q.GetChanHint(true))
 	}
-	if comNum > q.State.StateIdx { // future state, uhoh.  Crash for now.
+	if comNum > q.ChanState.Commitment.StateIdx { // future state, uhoh.  Crash for now.
 		logging.Info("indicated state %d but we know up to %d",
-			comNum, q.State.StateIdx)
+			comNum, q.ChanState.Commitment.StateIdx)
 		return cTxos, nil
 	}
 
 	// if we didn't get the pkh, and the comNum is current, we get the SH output.
 	// also we probably closed ourselves.  Regular timeout
-	if !pkhIsMine && shIdx < 999 && comNum != 0 && comNum == q.State.StateIdx {
+	if !pkhIsMine && shIdx < 999 && comNum != 0 && comNum == q.ChanState.Commitment.StateIdx {
 		theirElkPoint, err := q.ElkPoint(false, comNum)
 		if err != nil {
 			return nil, err
 		}
 
 		// build script to store in porTxo, make pubkeys
-		timeoutPub := lnutil.AddPubsEZ(q.MyHAKDBase, theirElkPoint)
-		revokePub := lnutil.CombinePubs(q.TheirHAKDBase, theirElkPoint)
+		// FIXME Are these supposed to be slices?
+		timeoutPub := lnutil.AddPubsEZ(q.ChanState.MyHakdBase, theirElkPoint[:])
+		revokePub := lnutil.CombinePubs(q.ChanState.TheirHakdBase, theirElkPoint[:])
 
-		script := lnutil.CommitScript(revokePub, timeoutPub, q.Delay)
+		// FIXME
+		revp33 := [33]byte{}
+		copy(revp33[:], revokePub)
+		topub33 := [33]byte{}
+		copy(topub33[:], timeoutPub)
+		script := lnutil.CommitScript(revp33, topub33, q.Delay)
 		// script check.  redundant / just in case
 		genSH := fastsha256.Sum256(script)
 		if !bytes.Equal(genSH[:], tx.TxOut[shIdx].PkScript[2:34]) {
@@ -367,21 +383,21 @@ func (q *Qchan) GetCloseTxos(tx *wire.MsgTx) ([]portxo.PorTxo, error) {
 		// create the ScriptHash, timeout portxo.
 		var shTxo portxo.PorTxo // create new utxo and copy into it
 		// use txidx's elkrem as it may not be most recent
-		elk, err := q.ElkSnd.AtIndex(comNum)
+		elk, err := q.ChanState.ElkSnd.AtIndex(comNum)
 		if err != nil {
 			return nil, err
 		}
 		// keypath is the same, except for use
-		shTxo.KeyGen = q.KeyGen
+		shTxo.KeyGen = q.ChanState.Txo.KeyGen
 
 		shTxo.Op.Hash = txid
 		shTxo.Op.Index = shIdx
-		shTxo.Height = q.CloseData.CloseHeight
+		shTxo.Height = q.ChanState.CloseData.CloseHeight
 
 		shTxo.KeyGen.Step[2] = UseChannelHAKDBase
 
 		elkpoint := lnutil.ElkPointFromHash(elk)
-		addhash := chainhash.DoubleHashH(append(elkpoint[:], q.MyHAKDBase[:]...))
+		addhash := chainhash.DoubleHashH(append(elkpoint[:], q.ChanState.MyHakdBase[:]...))
 
 		shTxo.PrivKey = addhash
 
@@ -396,7 +412,7 @@ func (q *Qchan) GetCloseTxos(tx *wire.MsgTx) ([]portxo.PorTxo, error) {
 	}
 
 	// if we got the pkh, and the comNum is too old, we can get the SH.  Justice.
-	if pkhIsMine && comNum != 0 && comNum < q.State.StateIdx {
+	if pkhIsMine && comNum != 0 && comNum < q.ChanState.Commitment.StateIdx {
 		logging.Info("Executing Justice!")
 
 		// ---------- revoked SH is mine
@@ -412,11 +428,16 @@ func (q *Qchan) GetCloseTxos(tx *wire.MsgTx) ([]portxo.PorTxo, error) {
 			return nil, err
 		}
 
-		timeoutPub := lnutil.AddPubsEZ(q.TheirHAKDBase, myElkPoint)
-		revokePub := lnutil.CombinePubs(q.MyHAKDBase, myElkPoint)
-		script := lnutil.CommitScript(revokePub, timeoutPub, q.Delay)
+		// FIXME
+		timeoutPub := lnutil.AddPubsEZ(q.ChanState.TheirHakdBase, myElkPoint[:])
+		topub33 := [33]byte{}
+		copy(topub33[:], timeoutPub)
+		revokePub := lnutil.CombinePubs(q.ChanState.MyHakdBase, myElkPoint[:])
+		revp33 := [33]byte{}
+		copy(revp33[:], revokePub)
+		script := lnutil.CommitScript(revp33, topub33, q.Delay)
 
-		htlcOutsInTx, htlcOutIndexesInTx, err := q.GetHtlcTxosWithElkPointsAndRevPub(tx, false, myElkPoint, theirElkPoint, revokePub)
+		htlcOutsInTx, htlcOutIndexesInTx, err := q.GetHtlcTxosWithElkPointsAndRevPub(tx, false, myElkPoint, theirElkPoint, revp33)
 		if err != nil {
 			return nil, err
 		}
@@ -457,16 +478,16 @@ func (q *Qchan) GetCloseTxos(tx *wire.MsgTx) ([]portxo.PorTxo, error) {
 		}
 
 		// myElkHashR added to HAKD private key
-		elk, err := q.ElkRcv.AtIndex(comNum)
+		elk, err := q.ChanState.ElkRcv.AtIndex(comNum)
 		if err != nil {
 			return nil, err
 		}
 
 		var shTxo portxo.PorTxo // create new utxo and copy into it
-		shTxo.KeyGen = q.KeyGen
+		shTxo.KeyGen = q.ChanState.Txo.KeyGen
 		shTxo.Op.Hash = txid
 		shTxo.Op.Index = shIdx
-		shTxo.Height = q.CloseData.CloseHeight
+		shTxo.Height = q.ChanState.CloseData.CloseHeight
 
 		shTxo.KeyGen.Step[2] = UseChannelHAKDBase
 
@@ -489,7 +510,9 @@ func (q *Qchan) GetCloseTxos(tx *wire.MsgTx) ([]portxo.PorTxo, error) {
 			logging.Info("Executing Justice on HTLC TXO!")
 
 			// script check
-			htlcScript, err := q.GenHTLCScriptWithElkPointsAndRevPub(q.State.HTLCs[i], false, theirElkPoint, myElkPoint, revokePub)
+			htlcScript, err := q.GenHTLCScriptWithElkPointsAndRevPub(
+				q.ChanState.Commitment.HTLCs[i], false,
+				theirElkPoint[:], myElkPoint[:], revokePub)
 			if err != nil {
 				return nil, err
 			}
@@ -503,10 +526,10 @@ func (q *Qchan) GetCloseTxos(tx *wire.MsgTx) ([]portxo.PorTxo, error) {
 			}
 
 			var htlcTxo portxo.PorTxo // create new utxo and copy into it
-			htlcTxo.KeyGen = q.KeyGen
+			htlcTxo.KeyGen = q.ChanState.Txo.KeyGen
 			htlcTxo.Op.Hash = txid
 			htlcTxo.Op.Index = htlcOutIndexesInTx[i]
-			htlcTxo.Height = q.CloseData.CloseHeight
+			htlcTxo.Height = q.ChanState.CloseData.CloseHeight
 
 			htlcTxo.KeyGen.Step[2] = UseChannelHAKDBase
 

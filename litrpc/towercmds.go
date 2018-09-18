@@ -18,7 +18,7 @@ func (r *LitRPC) Watch(args WatchArgs, reply *WatchReply) error {
 		return err
 	}
 	// see if channel is closed and error early
-	if qc.CloseData.Closed {
+	if qc.ChanState.CloseData.Closed {
 		return fmt.Errorf("Can't push; channel %d closed", args.ChanIdx)
 	}
 

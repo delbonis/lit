@@ -39,7 +39,7 @@ func makeTmpNewPeerHandler(nd *LitNode) func(eventbus.Event) eventbus.EventHandl
 		// iterate through all this peer's channels to extract outpoints
 		rpeer.OpMap = make(map[[36]byte]uint32)
 		for _, q := range rpeer.QCs {
-			opArr := lnutil.OutPointToBytes(q.Op)
+			opArr := lnutil.OutPointToBytes(q.ChanState.Txo.Op)
 			rpeer.OpMap[opArr] = q.Idx()
 		}
 

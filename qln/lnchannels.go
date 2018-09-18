@@ -2,16 +2,16 @@ package qln
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"sync"
 
+	"github.com/mit-dci/lit/btcutil/chaincfg/chainhash"
+	"github.com/mit-dci/lit/crypto/koblitz"
 	"github.com/mit-dci/lit/elkrem"
 	"github.com/mit-dci/lit/lnutil"
 	"github.com/mit-dci/lit/logging"
 	"github.com/mit-dci/lit/portxo"
-
-	"github.com/mit-dci/lit/btcutil/chaincfg/chainhash"
-	"github.com/mit-dci/lit/crypto/koblitz"
 )
 
 // Uhh, quick channel.  For now.  Once you get greater spire it upgrades to
@@ -21,55 +21,35 @@ type Qchan struct {
 
 	ChanState *QchanState
 
-	portxo.PorTxo            // S underlying utxo data
-	CloseData     QCloseData // S closing outpoint
-
-	MyPub    [33]byte // D my channel specific pubkey
-	TheirPub [33]byte // S their channel specific pubkey
-
-	// Refunds are also elkremified
-	MyRefundPub    [33]byte // D my refund pubkey for channel break
-	TheirRefundPub [33]byte // S their pubkey for channel break
-
-	MyHAKDBase    [33]byte // D my base point for HAKD and timeout keys
-	TheirHAKDBase [33]byte // S their base point for HAKD and timeout keys
-	// PKH for penalty tx.  Derived
-	WatchRefundAdr [20]byte
-
-	// Elkrem is used for revoking state commitments
-	ElkSnd *elkrem.ElkremSender   // D derived from channel specific key
-	ElkRcv *elkrem.ElkremReceiver // S stored in db
-
 	Delay uint16 // blocks for timeout (default 5 for testing)
-
-	State *StatCom // S current state of channel
 
 	ClearToSend chan bool // send a true here when you get a rev
 	ChanMtx     sync.Mutex
 	// exists only in ram, doesn't touch disk
 
-	LastUpdate uint64 // unix timestamp of last update (milliseconds)
-
 }
 
 type QchanState struct {
-	Txo       portxo.PorTxo `json:"txo"`
-	CloseData QCloseData    `json:"closedata"`
+	Txo       portxo.PorTxo `json:"txo"`       // underlying utxo data
+	CloseData QCloseData    `json:"closedata"` // closing outpoint
 
-	MyPub    []byte `json:"mpub"`
-	TheirPub []byte `json:"opub"`
+	MyPub    []byte `json:"mpub"` // my channel specific pubkey
+	TheirPub []byte `json:"opub"` // their channel specific pubkey
 
-	MyRefundPub    []byte `json:"mrpub"`
-	TheirRefundPub []byte `json:"orpub"`
+	MyRefundPub    []byte `json:"mrpub"` // my refund pubkey for channel break
+	TheirRefundPub []byte `json:"orpub"` // their pubkey for channel break
 
-	WatchRefundAddr []byte `json:"wraddr"`
+	MyHakdBase    []byte `json:"mhakdbase"` // my base point for HAKD and timeout keys
+	TheirHakdBase []byte `json:"ohakdbase"` // their base point for HAKD and timeout keys
 
-	ElkSnd *elkrem.ElkremSender `json:"elks"`
-	ElkRcv *elkrem.ElkremSender `json:"elkr"`
+	WatchRefundAddr []byte `json:"wraddr"` // PKH for penalty tx
+
+	ElkSnd *elkrem.ElkremSender   `json:"elks"` // from channel specific key (for making elk stuff)
+	ElkRcv *elkrem.ElkremReceiver `json:"elkr"` // stored in db
 
 	Commitment *StatCom `json:"statecom"`
 
-	LastUpdate uint64 `json:"updated"`
+	LastUpdate uint64 `json:"updateunix"` // unix timestamp of last update (milliseconds)
 }
 
 // 4 + 1 + 8 + 32 + 4 + 33 + 33 + 1 + 5 + 32 + 64 = 217 bytes
@@ -81,8 +61,8 @@ type HTLC struct {
 	RHash    [32]byte `json:"hash"`
 	Locktime uint32   `json:"locktime"`
 
-	MyHTLCBase    [33]byte `json:"mbase"`
-	TheirHTLCBase [33]byte `json:"obase"`
+	MyHTLCBase    []byte `json:"mbase"`
+	TheirHTLCBase []byte `json:"obase"`
 
 	KeyGen portxo.KeyGen `json:"keygen"`
 
@@ -163,34 +143,41 @@ type QCloseData struct {
 	Closed      bool           `json:"closed"` // if channel is closed; if CloseTxid != -1
 }
 
+func NewEmptyQchan() *Qchan {
+	qc := new(Qchan)
+	qc.ChanState = new(QchanState)
+	qc.ChanState.Commitment = new(StatCom)
+	return qc
+}
+
 // ChannelInfo prints info about a channel.
 func (nd *LitNode) QchanInfo(q *Qchan) error {
 	// display txid instead of outpoint because easier to copy/paste
 	logging.Infof("CHANNEL %s h:%d %s cap: %d\n",
-		q.Op.String(), q.Height, q.KeyGen.String(), q.Value)
+		q.ChanState.Txo.Op.String(), q.ChanState.Txo.Height, q.ChanState.Txo.KeyGen.String(), q.ChanState.Txo.Value)
 	logging.Infof("\tPUB mine:%x them:%x REFBASE mine:%x them:%x BASE mine:%x them:%x\n",
-		q.MyPub[:4], q.TheirPub[:4], q.MyRefundPub[:4], q.TheirRefundPub[:4],
-		q.MyHAKDBase[:4], q.TheirHAKDBase[:4])
-	if q.State == nil || q.ElkRcv == nil {
+		q.ChanState.MyPub[:4], q.ChanState.TheirPub[:4], q.ChanState.MyRefundPub[:4], q.ChanState.TheirRefundPub[:4],
+		q.ChanState.MyHakdBase[:4], q.ChanState.TheirHakdBase[:4])
+	if q.ChanState.Commitment == nil || q.ChanState.ElkRcv == nil {
 		logging.Errorf("\t no valid state or elkrem\n")
 	} else {
 		logging.Infof("\ta %d (them %d) state index %d\n",
-			q.State.MyAmt, q.Value-q.State.MyAmt, q.State.StateIdx)
+			q.ChanState.Commitment.MyAmt, q.ChanState.Txo.Value-q.ChanState.Commitment.MyAmt, q.ChanState.Commitment.StateIdx)
 
 		logging.Infof("\tdelta:%d HAKD:%x elk@ %d\n",
-			q.State.Delta, q.State.ElkPoint[:4], q.ElkRcv.UpTo())
-		elkp, _ := q.ElkPoint(false, q.State.StateIdx)
-		myRefPub := lnutil.AddPubsEZ(q.MyRefundPub, elkp)
-		theirRefPub := lnutil.AddPubsEZ(q.TheirRefundPub, q.State.ElkPoint)
+			q.ChanState.Commitment.Delta, q.ChanState.Commitment.ElkPoint[:4], q.ChanState.ElkRcv.UpTo())
+		elkp, _ := q.ElkPoint(false, q.ChanState.Commitment.StateIdx)
+		myRefPub := lnutil.AddPubsEZ(q.ChanState.MyRefundPub, elkp[:])
+		theirRefPub := lnutil.AddPubsEZ(q.ChanState.TheirRefundPub, q.ChanState.Commitment.ElkPoint[:])
 		logging.Infof("\tMy Refund: %x Their Refund %x\n", myRefPub[:4], theirRefPub[:4])
 	}
 
-	if !q.CloseData.Closed { // still open, finish here
+	if !q.ChanState.CloseData.Closed { // still open, finish here
 		return nil
 	}
 
 	logging.Infof("\tCLOSED at height %d by tx: %s\n",
-		q.CloseData.CloseHeight, q.CloseData.CloseTxid.String())
+		q.ChanState.CloseData.CloseHeight, q.ChanState.CloseData.CloseTxid.String())
 	//	clTx, err := t.GetTx(&q.CloseData.CloseTxid)
 	//	if err != nil {
 	//		return err
@@ -220,7 +207,7 @@ func (q *Qchan) Peer() uint32 {
 	if q == nil {
 		return 0
 	}
-	return q.KeyGen.Step[3] & 0x7fffffff
+	return q.ChanState.Txo.KeyGen.Step[3] & 0x7fffffff
 }
 
 // Idx returns the local index of the channel
@@ -228,7 +215,7 @@ func (q *Qchan) Idx() uint32 {
 	if q == nil {
 		return 0
 	}
-	return q.KeyGen.Step[4] & 0x7fffffff
+	return q.ChanState.Txo.KeyGen.Step[4] & 0x7fffffff
 }
 
 // Coin returns the coin type of the channel
@@ -236,12 +223,12 @@ func (q *Qchan) Coin() uint32 {
 	if q == nil {
 		return 0
 	}
-	return q.KeyGen.Step[1] & 0x7fffffff
+	return q.ChanState.Txo.KeyGen.Step[1] & 0x7fffffff
 }
 
 // ImFirst decides who goes first when it's unclear.  Smaller pubkey goes first.
 func (q *Qchan) ImFirst() bool {
-	return bytes.Compare(q.MyRefundPub[:], q.TheirRefundPub[:]) == -1
+	return bytes.Compare(q.ChanState.MyRefundPub[:], q.ChanState.TheirRefundPub[:]) == -1
 }
 
 // GetChanHint gives the 6 byte hint mask of the channel.  It's derived from the
@@ -253,9 +240,9 @@ func (q *Qchan) GetChanHint(mine bool) uint64 {
 	// could cache these in memory for a slight speedup
 	var h []byte
 	if mine {
-		h = chainhash.DoubleHashB(append(q.MyRefundPub[:], q.TheirRefundPub[:]...))
+		h = chainhash.DoubleHashB(append(q.ChanState.MyRefundPub[:], q.ChanState.TheirRefundPub[:]...))
 	} else {
-		h = chainhash.DoubleHashB(append(q.TheirRefundPub[:], q.MyRefundPub[:]...))
+		h = chainhash.DoubleHashB(append(q.ChanState.TheirRefundPub[:], q.ChanState.MyRefundPub[:]...))
 	}
 
 	if len(h) != 32 {
@@ -279,11 +266,11 @@ func (nd *LitNode) GetDHSecret(q *Qchan) ([]byte, error) {
 		return nil, fmt.Errorf("GetDHPoint: nil node or channel")
 	}
 
-	theirPub, err := koblitz.ParsePubKey(q.TheirPub[:], koblitz.S256())
+	theirPub, err := koblitz.ParsePubKey(q.ChanState.TheirPub[:], koblitz.S256())
 	if err != nil {
 		return nil, err
 	}
-	priv, err := nd.SubWallet[q.Coin()].GetPriv(q.KeyGen)
+	priv, err := nd.SubWallet[q.Coin()].GetPriv(q.ChanState.Txo.KeyGen)
 	// if this breaks, return
 	if err != nil {
 		return nil, err
@@ -295,16 +282,40 @@ func (nd *LitNode) GetDHSecret(q *Qchan) ([]byte, error) {
 // GetChannelBalances returns myAmt and theirAmt in the channel
 // that aren't locked up in HTLCs in satoshis
 func (q *Qchan) GetChannelBalances() (int64, int64) {
-	value := q.Value
+	value := q.ChanState.Txo.Value
 
-	for _, h := range q.State.HTLCs {
+	for _, h := range q.ChanState.Commitment.HTLCs {
 		if !h.Cleared {
 			value -= h.Amt
 		}
 	}
 
-	myAmt := q.State.MyAmt
+	myAmt := q.ChanState.Commitment.MyAmt
 	theirAmt := value - myAmt
 
 	return myAmt, theirAmt
+}
+
+// Bytes returns the byte representation of this qchanstate.
+func (s *QchanState) Bytes() []byte {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return []byte{}
+	}
+	return []byte(b)
+}
+
+// QchanStateFromBytes returns a qchanstate if it can parse the bytes
+// properly, or an error.
+func QchanStateFromBytes(buf []byte) (*QchanState, error) {
+
+	qcs := new(QchanState)
+	err := json.Unmarshal(buf, qcs)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return qcs, nil
+
 }

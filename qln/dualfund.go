@@ -364,42 +364,42 @@ func (nd *LitNode) DualFundingAcceptHandler(msg lnutil.DualFundingAcceptMsg) {
 	nd.InProgDual.TheirHAKDBase = msg.OurHAKDBase
 
 	// make channel (not in db) just for keys / elk
-	q := new(Qchan)
+	q := NewEmptyQchan()
 
-	q.Height = -1
+	txo := portxo.PorTxo{}
+	txo.Height = -1
+	txo.Value = nd.InProg.Amt
+	txo.KeyGen.Depth = 5
+	txo.KeyGen.Step[0] = 44 | 1<<31
+	txo.KeyGen.Step[1] = nd.InProgDual.CoinType | 1<<31
+	txo.KeyGen.Step[2] = UseChannelFund
+	txo.KeyGen.Step[3] = nd.InProgDual.PeerIdx | 1<<31
+	txo.KeyGen.Step[4] = nd.InProgDual.ChanIdx | 1<<31
 
-	q.Value = nd.InProg.Amt
-
-	q.KeyGen.Depth = 5
-	q.KeyGen.Step[0] = 44 | 1<<31
-	q.KeyGen.Step[1] = nd.InProgDual.CoinType | 1<<31
-	q.KeyGen.Step[2] = UseChannelFund
-	q.KeyGen.Step[3] = nd.InProgDual.PeerIdx | 1<<31
-	q.KeyGen.Step[4] = nd.InProgDual.ChanIdx | 1<<31
-
-	q.MyPub, _ = nd.GetUsePub(q.KeyGen, UseChannelFund)
-	q.MyRefundPub, _ = nd.GetUsePub(q.KeyGen, UseChannelRefund)
-	q.MyHAKDBase, _ = nd.GetUsePub(q.KeyGen, UseChannelHAKDBase)
+	q.ChanState.Txo = txo
+	q.ChanState.MyPub, _ = nd.GetUsePubSlice(q.ChanState.Txo.KeyGen, UseChannelFund)
+	q.ChanState.MyRefundPub, _ = nd.GetUsePubSlice(q.ChanState.Txo.KeyGen, UseChannelRefund)
+	q.ChanState.MyHakdBase, _ = nd.GetUsePubSlice(q.ChanState.Txo.KeyGen, UseChannelHAKDBase)
 
 	// chop up incoming message, save points to channel struct
-	copy(q.TheirPub[:], nd.InProgDual.TheirPub[:])
-	copy(q.TheirRefundPub[:], nd.InProgDual.TheirRefundPub[:])
-	copy(q.TheirHAKDBase[:], nd.InProgDual.TheirHAKDBase[:])
+	copy(q.ChanState.TheirPub[:], nd.InProgDual.TheirPub[:])
+	copy(q.ChanState.TheirRefundPub[:], nd.InProgDual.TheirRefundPub[:])
+	copy(q.ChanState.TheirHakdBase[:], nd.InProgDual.TheirHAKDBase[:])
 
 	// make sure their pubkeys are real pubkeys
-	_, err := koblitz.ParsePubKey(q.TheirPub[:], koblitz.S256())
+	_, err := koblitz.ParsePubKey(q.ChanState.TheirPub[:], koblitz.S256())
 	if err != nil {
 		nd.InProgDual.mtx.Unlock()
 		logging.Errorf("PubRespHandler TheirPub err %s", err.Error())
 		return
 	}
-	_, err = koblitz.ParsePubKey(q.TheirRefundPub[:], koblitz.S256())
+	_, err = koblitz.ParsePubKey(q.ChanState.TheirRefundPub, koblitz.S256())
 	if err != nil {
 		nd.InProgDual.mtx.Unlock()
 		logging.Errorf("PubRespHandler TheirRefundPub err %s", err.Error())
 		return
 	}
-	_, err = koblitz.ParsePubKey(q.TheirHAKDBase[:], koblitz.S256())
+	_, err = koblitz.ParsePubKey(q.ChanState.TheirHakdBase, koblitz.S256())
 	if err != nil {
 		nd.InProgDual.mtx.Unlock()
 		logging.Errorf("PubRespHandler TheirHAKDBase err %s", err.Error())
@@ -423,32 +423,33 @@ func (nd *LitNode) DualFundingAcceptHandler(msg lnutil.DualFundingAcceptMsg) {
 	nd.InProgDual.TheirN2HTLCBase = msg.OurN2HTLCBase
 
 	// derive elkrem sender root from HD keychain
-	elkRoot, _ := nd.GetElkremRoot(q.KeyGen)
-	q.ElkSnd = elkrem.NewElkremSender(elkRoot)
+	elkRoot, _ := nd.GetElkremRoot(q.ChanState.Txo.KeyGen)
+	q.ChanState.ElkSnd = elkrem.NewElkremSender(elkRoot)
 
 	// Build the funding transaction
 	tx, _ := nd.BuildDualFundingTransaction()
 
 	outPoint := wire.OutPoint{Hash: tx.TxHash(), Index: 0}
 	nd.InProgDual.OutPoint = &outPoint
-	q.Op = *nd.InProgDual.OutPoint
+	q.ChanState.Txo.Op = *nd.InProgDual.OutPoint
 
 	// create initial state for elkrem points
-	q.State = new(StatCom)
-	q.State.StateIdx = 0
-	q.State.MyAmt = nd.InProgDual.OurAmount
+	sc := new(StatCom)
+	sc.StateIdx = 0
+	sc.MyAmt = nd.InProgDual.OurAmount
 	// get fee from sub wallet.  Later should make fee per channel and update state
 	// based on size
-	q.State.Fee = nd.SubWallet[q.Coin()].Fee() * consts.QcStateFee
-	q.Value = nd.InProgDual.OurAmount + nd.InProgDual.TheirAmount
+	sc.Fee = nd.SubWallet[q.Coin()].Fee() * consts.QcStateFee
+	q.ChanState.Txo.Value = nd.InProgDual.OurAmount + nd.InProgDual.TheirAmount
 
-	q.State.NextHTLCBase = msg.OurNextHTLCBase
-	q.State.N2HTLCBase = msg.OurN2HTLCBase
-	q.State.MyNextHTLCBase = nd.InProgDual.OurNextHTLCBase
-	q.State.MyN2HTLCBase = nd.InProgDual.OurN2HTLCBase
+	sc.NextHTLCBase = msg.OurNextHTLCBase
+	sc.N2HTLCBase = msg.OurN2HTLCBase
+	sc.MyNextHTLCBase = nd.InProgDual.OurNextHTLCBase
+	sc.MyN2HTLCBase = nd.InProgDual.OurN2HTLCBase
+	q.ChanState.Commitment = sc
 
 	// save channel to db
-	err = nd.SaveQChan(q)
+	err = nd.SaveQchanState(q)
 	if err != nil {
 		logging.Errorf("PointRespHandler SaveQchanState err %s", err.Error())
 		return
@@ -472,11 +473,20 @@ func (nd *LitNode) DualFundingAcceptHandler(msg lnutil.DualFundingAcceptMsg) {
 		return
 	}
 
+	// FIXME PLEEEEASE
+	mp33 := [33]byte{}
+	copy(mp33[:], q.ChanState.MyPub)
+	mrp33 := [33]byte{}
+	copy(mrp33[:], q.ChanState.MyRefundPub)
+	mhb33 := [33]byte{}
+	copy(mhb33[:], q.ChanState.MyHakdBase)
+
 	outMsg := lnutil.NewChanDescMsg(
-		nd.InProgDual.PeerIdx, *nd.InProgDual.OutPoint, q.MyPub, q.MyRefundPub, q.MyHAKDBase, nd.InProgDual.OurNextHTLCBase,
+		nd.InProgDual.PeerIdx, *nd.InProgDual.OutPoint,
+		mp33, mrp33, mhb33, nd.InProgDual.OurNextHTLCBase,
 		nd.InProgDual.OurN2HTLCBase,
 		nd.InProgDual.CoinType, nd.InProgDual.OurAmount+nd.InProgDual.TheirAmount, nd.InProgDual.TheirAmount,
-		elkPointZero, elkPointOne, elkPointTwo, q.State.Data)
+		elkPointZero, elkPointOne, elkPointTwo, q.ChanState.Commitment.Data)
 
 	nd.InProgDual.mtx.Unlock()
 	nd.tmpSendLitMsg(outMsg)
@@ -582,24 +592,25 @@ func (nd *LitNode) DualFundChanDescHandler(msg lnutil.ChanDescMsg) error {
 	}
 
 	qc := new(Qchan)
+	qc.ChanState = new(QchanState)
 
-	qc.Height = -1
-	qc.KeyGen.Depth = 5
-	qc.KeyGen.Step[0] = 44 | 1<<31
-	qc.KeyGen.Step[1] = msg.CoinType | 1<<31
-	qc.KeyGen.Step[2] = UseChannelFund
-	qc.KeyGen.Step[3] = msg.Peer() | 1<<31
-	qc.KeyGen.Step[4] = cIdx | 1<<31
-	qc.Value = amt
-	qc.Mode = portxo.TxoP2WSHComp
-	qc.Op = op
+	qc.ChanState.Txo.Height = -1
+	qc.ChanState.Txo.KeyGen.Depth = 5
+	qc.ChanState.Txo.KeyGen.Step[0] = 44 | 1<<31
+	qc.ChanState.Txo.KeyGen.Step[1] = msg.CoinType | 1<<31
+	qc.ChanState.Txo.KeyGen.Step[2] = UseChannelFund
+	qc.ChanState.Txo.KeyGen.Step[3] = msg.Peer() | 1<<31
+	qc.ChanState.Txo.KeyGen.Step[4] = cIdx | 1<<31
+	qc.ChanState.Txo.Value = amt
+	qc.ChanState.Txo.Mode = portxo.TxoP2WSHComp
+	qc.ChanState.Txo.Op = op
 
-	qc.TheirPub = msg.PubKey
-	qc.TheirRefundPub = msg.RefundPub
-	qc.TheirHAKDBase = msg.HAKDbase
-	qc.MyPub, _ = nd.GetUsePub(qc.KeyGen, UseChannelFund)
-	qc.MyRefundPub, _ = nd.GetUsePub(qc.KeyGen, UseChannelRefund)
-	qc.MyHAKDBase, _ = nd.GetUsePub(qc.KeyGen, UseChannelHAKDBase)
+	qc.ChanState.TheirPub = msg.PubKey[:]
+	qc.ChanState.TheirRefundPub = msg.RefundPub[:]
+	qc.ChanState.TheirHakdBase = msg.HAKDbase[:]
+	qc.ChanState.MyPub, _ = nd.GetUsePubSlice(qc.ChanState.Txo.KeyGen, UseChannelFund)
+	qc.ChanState.MyRefundPub, _ = nd.GetUsePubSlice(qc.ChanState.Txo.KeyGen, UseChannelRefund)
+	qc.ChanState.MyHakdBase, _ = nd.GetUsePubSlice(qc.ChanState.Txo.KeyGen, UseChannelHAKDBase)
 
 	_, err = koblitz.ParsePubKey(msg.NextHTLCBase[:], koblitz.S256())
 	if err != nil {
@@ -621,29 +632,31 @@ func (nd *LitNode) DualFundChanDescHandler(msg lnutil.ChanDescMsg) error {
 	logging.Infof("got multisig output %s amt %d\n", op.String(), amt)
 
 	// create initial state
-	qc.State = new(StatCom)
+	sc := new(StatCom)
 	// similar to SIGREV in pushpull
 
 	// TODO assumes both parties use same fee
-	qc.State.Fee = wal.Fee() * consts.QcStateFee
-	qc.State.MyAmt = msg.InitPayment
+	sc.Fee = wal.Fee() * consts.QcStateFee
+	sc.MyAmt = msg.InitPayment
 
-	qc.State.Data = msg.Data
+	sc.Data = msg.Data
 
-	qc.State.StateIdx = 0
+	sc.StateIdx = 0
 	// use new ElkPoint for signing
-	qc.State.ElkPoint = msg.ElkZero
-	qc.State.NextElkPoint = msg.ElkOne
-	qc.State.N2ElkPoint = msg.ElkTwo
+	sc.ElkPoint = msg.ElkZero
+	sc.NextElkPoint = msg.ElkOne
+	sc.N2ElkPoint = msg.ElkTwo
 
-	qc.State.MyNextHTLCBase = nd.InProgDual.OurNextHTLCBase
-	qc.State.MyN2HTLCBase = nd.InProgDual.OurN2HTLCBase
+	sc.MyNextHTLCBase = nd.InProgDual.OurNextHTLCBase
+	sc.MyN2HTLCBase = nd.InProgDual.OurN2HTLCBase
 
-	qc.State.NextHTLCBase = msg.NextHTLCBase
-	qc.State.N2HTLCBase = msg.N2HTLCBase
+	sc.NextHTLCBase = msg.NextHTLCBase
+	sc.N2HTLCBase = msg.N2HTLCBase
+
+	qc.ChanState.Commitment = sc // I think this is right.
 
 	// save new channel to db
-	err = nd.SaveQChan(qc)
+	err = nd.SaveQchanState(qc)
 	if err != nil {
 		return fmt.Errorf("DualFundChanDescHandler err %s", err.Error())
 	}
@@ -712,9 +725,9 @@ func (nd *LitNode) DualFundChanAckHandler(msg lnutil.DualFundingChanAckMsg, peer
 	//		logging.Errorf("QChanAckHandler IngestElkrem err %s", err.Error())
 	//		return
 	//	}
-	qc.State.ElkPoint = msg.ElkZero
-	qc.State.NextElkPoint = msg.ElkOne
-	qc.State.N2ElkPoint = msg.ElkTwo
+	qc.ChanState.Commitment.ElkPoint = msg.ElkZero
+	qc.ChanState.Commitment.NextElkPoint = msg.ElkOne
+	qc.ChanState.Commitment.N2ElkPoint = msg.ElkTwo
 
 	err = qc.VerifySigs(sig, nil)
 	if err != nil {
@@ -760,7 +773,7 @@ func (nd *LitNode) DualFundChanAckHandler(msg lnutil.DualFundingChanAckMsg, peer
 
 	nd.SubWallet[qc.Coin()].DirectSendTx(tx)
 
-	err = nd.SubWallet[qc.Coin()].WatchThis(qc.Op)
+	err = nd.SubWallet[qc.Coin()].WatchThis(qc.ChanState.Txo.Op)
 	if err != nil {
 		logging.Errorf("DualFundChanAckHandler WatchThis err %s", err.Error())
 		return
@@ -771,7 +784,7 @@ func (nd *LitNode) DualFundChanAckHandler(msg lnutil.DualFundingChanAckMsg, peer
 	// TODO this is weird & ugly... maybe have an export keypath func?
 	nullTxo := new(portxo.PorTxo)
 	nullTxo.Value = 0 // redundant, but explicitly show that this is just for adr
-	nullTxo.KeyGen = qc.KeyGen
+	nullTxo.KeyGen = qc.ChanState.Txo.KeyGen
 	nullTxo.KeyGen.Step[2] = UseChannelWatchRefund
 	nd.SubWallet[qc.Coin()].ExportUtxo(nullTxo)
 
@@ -780,7 +793,7 @@ func (nd *LitNode) DualFundChanAckHandler(msg lnutil.DualFundingChanAckMsg, peer
 	result := new(DualFundingResult)
 
 	result.Accepted = true
-	result.ChannelId = qc.KeyGen.Step[4] & 0x7fffffff
+	result.ChannelId = qc.Idx()
 
 	logging.Infof("Built result with channel ID %d, committing...\n", result.ChannelId)
 
@@ -847,7 +860,7 @@ func (nd *LitNode) DualFundSigProofHandler(msg lnutil.SigProofMsg, peer *RemoteP
 	// tell base wallet about watcher refund address in case that happens
 	nullTxo := new(portxo.PorTxo)
 	nullTxo.Value = 0 // redundant, but explicitly show that this is just for adr
-	nullTxo.KeyGen = qc.KeyGen
+	nullTxo.KeyGen = qc.ChanState.Txo.KeyGen
 	nullTxo.KeyGen.Step[2] = UseChannelWatchRefund
 	wal.ExportUtxo(nullTxo)
 
@@ -860,7 +873,7 @@ func (nd *LitNode) DualFundSigProofHandler(msg lnutil.SigProofMsg, peer *RemoteP
 	result := new(DualFundingResult)
 
 	result.Accepted = true
-	result.ChannelId = qc.KeyGen.Step[4] & 0x7fffffff
+	result.ChannelId = qc.Idx()
 	nd.InProgDual.mtx.Lock()
 	nd.InProgDual.done <- result
 	nd.InProgDual.Clear()

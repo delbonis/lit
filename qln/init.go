@@ -190,13 +190,13 @@ func (nd *LitNode) LinkBaseWallet(
 
 	for _, qChan := range qChans {
 		var pkh [20]byte
-		pkhSlice := btcutil.Hash160(qChan.MyRefundPub[:])
+		pkhSlice := btcutil.Hash160(qChan.ChanState.MyRefundPub[:])
 		copy(pkh[:], pkhSlice)
 		nd.SubWallet[WallitIdx].ExportHook().RegisterAddress(pkh)
 
-		logging.Infof("Registering outpoint %v", qChan.PorTxo.Op)
+		logging.Infof("Registering outpoint %v", qChan.ChanState.Txo.Op)
 
-		nd.SubWallet[WallitIdx].WatchThis(qChan.PorTxo.Op)
+		nd.SubWallet[WallitIdx].WatchThis(qChan.ChanState.Txo.Op)
 	}
 
 	go nd.OPEventHandler(nd.SubWallet[WallitIdx].LetMeKnow())

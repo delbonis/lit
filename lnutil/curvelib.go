@@ -6,8 +6,8 @@ import (
 	"math/big"
 	"sort"
 
-	"github.com/mit-dci/lit/crypto/koblitz"
 	"github.com/mit-dci/lit/btcutil/chaincfg/chainhash"
+	"github.com/mit-dci/lit/crypto/koblitz"
 )
 
 // PrivKeyAddBytes adds bytes to a private key.
@@ -202,7 +202,7 @@ func CombinePrivateKeys(keys ...*koblitz.PrivateKey) *koblitz.PrivateKey {
 // AddPubsEZ is the easy derivation; A + sha(B, A)*G
 // in LN this is used for everything but the revocable pubkey
 // order matters.  the first key is the base, the second is the elkpoint.
-func AddPubsEZ(a, b [33]byte) [33]byte {
+func AddPubsEZ(a, b []byte) []byte {
 	apoint, err := koblitz.ParsePubKey(a[:], koblitz.S256())
 	if err != nil {
 		return a
@@ -234,20 +234,20 @@ func AddPrivEZ(k *koblitz.PrivateKey, b []byte) {
 
 // CombinePubs takes two 33 byte serialized points, and combines them with
 // the deliniearized combination process.  Returns empty array if there's an error.
-func CombinePubs(a, b [33]byte) [33]byte {
+func CombinePubs(a, b []byte) []byte {
 	var c [33]byte
-	apoint, err := koblitz.ParsePubKey(a[:], koblitz.S256())
+	apoint, err := koblitz.ParsePubKey(a, koblitz.S256())
 	if err != nil {
-		return c
+		return c[:]
 	}
-	bpoint, err := koblitz.ParsePubKey(b[:], koblitz.S256())
+	bpoint, err := koblitz.ParsePubKey(b, koblitz.S256())
 	if err != nil {
-		return c
+		return c[:]
 	}
 	cSlice := CombinablePubKeySlice{apoint, bpoint}
 	cPub := cSlice.Combine()
 	copy(c[:], cPub.SerializeCompressed())
-	return c
+	return c[:]
 }
 
 // HashToPub turns a 32 byte hash into a 33 byte serialized pubkey

@@ -468,7 +468,7 @@ func (nd *LitNode) advertiseLinks(seq uint32) {
 	nd.RemoteMtx.Lock()
 	for _, peer := range nd.RemoteCons {
 		for _, q := range peer.QCs {
-			if !q.CloseData.Closed && q.State.MyAmt >= 2*(consts.MinOutput+q.State.Fee) && !q.State.Failed {
+			if !q.ChanState.CloseData.Closed && q.ChanState.Commitment.MyAmt >= 2*(consts.MinOutput+q.ChanState.Commitment.Fee) && !q.ChanState.Commitment.Failed {
 				outHash := fastsha256.Sum256(peer.Con.RemotePub().SerializeCompressed())
 				var BPKH [20]byte
 				copy(BPKH[:], outHash[:20])
@@ -477,7 +477,7 @@ func (nd *LitNode) advertiseLinks(seq uint32) {
 					caps[BPKH] = make(map[uint32]int64)
 				}
 
-				amt := q.State.MyAmt - consts.MinOutput - q.State.Fee
+				amt := q.ChanState.Commitment.MyAmt - consts.MinOutput - q.ChanState.Commitment.Fee
 
 				// Since we don't yet perform multi-path routing, the capacity
 				// is the maximum available single channel capacity

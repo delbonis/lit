@@ -121,7 +121,10 @@ func (nd *LitNode) MultihopPaymentAckHandler(msg lnutil.MultihopPaymentAckMsg) e
 				nd.RemoteMtx.Lock()
 				var qc *Qchan
 				for _, ch := range nd.RemoteCons[firstHopIdx].QCs {
-					if ch.Coin() == ourHop.CoinType && ch.State.MyAmt-consts.MinOutput-ch.State.Fee >= mh.Amt && !ch.CloseData.Closed && !ch.State.Failed {
+					if ch.Coin() == ourHop.CoinType &&
+						ch.ChanState.Commitment.MyAmt-consts.MinOutput-ch.ChanState.Commitment.Fee >= mh.Amt &&
+						!ch.ChanState.CloseData.Closed &&
+						!ch.ChanState.Commitment.Failed {
 						qc = ch
 						break
 					}
@@ -350,7 +353,10 @@ func (nd *LitNode) MultihopPaymentSetupHandler(msg lnutil.MultihopPaymentSetupMs
 	nd.RemoteMtx.Lock()
 	var qc *Qchan
 	for _, ch := range nd.RemoteCons[sendToIdx].QCs {
-		if ch.Coin() == ourHop.CoinType && ch.State.MyAmt-consts.MinOutput-fee >= amtRqd && !ch.CloseData.Closed && !ch.State.Failed {
+		if ch.Coin() == ourHop.CoinType &&
+			ch.ChanState.Commitment.MyAmt-consts.MinOutput-fee >= amtRqd &&
+			!ch.ChanState.CloseData.Closed &&
+			!ch.ChanState.Commitment.Failed {
 			qc = ch
 			break
 		}

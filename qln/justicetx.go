@@ -89,7 +89,7 @@ func (nd *LitNode) BuildJusticeSig(q *Qchan) error {
 
 	// first we need the keys in the bad script.  Start by getting the elk-scalar
 	// we should have it at the "current" state number
-	elk, err := q.ElkRcv.AtIndex(q.State.StateIdx)
+	elk, err := q.ChanState.ElkRcv.AtIndex(q.ChanState.Commitment.StateIdx)
 	if err != nil {
 		return err
 	}
@@ -99,12 +99,19 @@ func (nd *LitNode) BuildJusticeSig(q *Qchan) error {
 	// get elk point
 	elkPoint := lnutil.ElkPointFromHash(elk)
 	// overwrite remote elkpoint in channel state
-	q.State.ElkPoint = elkPoint
+	q.ChanState.Commitment.ElkPoint = elkPoint
 
 	// make pubkeys, build script
-	badRevokePub := lnutil.CombinePubs(q.MyHAKDBase, elkPoint)
-	badTimeoutPub := lnutil.AddPubsEZ(q.TheirHAKDBase, elkPoint)
-	script := lnutil.CommitScript(badRevokePub, badTimeoutPub, q.Delay)
+	badRevokePub := lnutil.CombinePubs(q.ChanState.MyHakdBase, elkPoint[:])
+	badTimeoutPub := lnutil.AddPubsEZ(q.ChanState.TheirHakdBase, elkPoint[:])
+
+	// FIXME
+	brevp33 := [33]byte{}
+	copy(brevp33[:], badRevokePub)
+	btop33 := [33]byte{}
+	copy(btop33[:], badTimeoutPub)
+
+	script := lnutil.CommitScript(brevp33, btop33, q.Delay)
 	scriptHashOutScript := lnutil.P2WSHify(script)
 
 	// TODO: we have to build justics txs for each of the HTLCs too
@@ -133,7 +140,7 @@ func (nd *LitNode) BuildJusticeSig(q *Qchan) error {
 	}
 
 	// make a keygen to get the private HAKD base scalar
-	kg := q.KeyGen
+	kg := q.ChanState.Txo.KeyGen
 	kg.Step[2] = UseChannelHAKDBase
 	// get HAKD base scalar
 	privBase, err := nd.SubWallet[q.Coin()].GetPriv(kg)
@@ -151,7 +158,10 @@ func (nd *LitNode) BuildJusticeSig(q *Qchan) error {
 	justiceIn := wire.NewTxIn(badOP, nil, nil)
 	justiceIn.Sequence = 1
 	// make justice output script
-	justiceScript := lnutil.DirectWPKHScriptFromPKH(q.WatchRefundAdr)
+	// FIXME
+	wra20 := [20]byte{}
+	copy(wra20[:], q.ChanState.WatchRefundAddr)
+	justiceScript := lnutil.DirectWPKHScriptFromPKH(wra20)
 	// make justice txout
 	justiceOut := wire.NewTxOut(badAmt-fee, justiceScript)
 
@@ -185,8 +195,8 @@ func (nd *LitNode) BuildJusticeSig(q *Qchan) error {
 	var jte JusticeTx
 	copy(jte.Sig[:], sig[:])
 	copy(jte.Txid[:], badTxid[:16])
-	jte.Data = q.State.Data
-	jte.Amt = q.State.MyAmt
+	jte.Data = q.ChanState.Commitment.Data
+	jte.Amt = q.ChanState.Commitment.MyAmt
 
 	justiceBytes, err := jte.ToBytes()
 	if err != nil {
@@ -196,7 +206,10 @@ func (nd *LitNode) BuildJusticeSig(q *Qchan) error {
 	var justiceBytesFixed [120]byte
 	copy(justiceBytesFixed[:], justiceBytes[:120])
 
-	return nd.SaveJusticeSig(q.State.StateIdx, q.WatchRefundAdr, justiceBytesFixed)
+	// FIXME
+	wra20x := [20]byte{}
+	copy(wra20x[:], q.ChanState.WatchRefundAddr)
+	return nd.SaveJusticeSig(q.ChanState.Commitment.StateIdx, wra20x, justiceBytesFixed)
 }
 
 // SaveJusticeSig save the txid/sig of a justice transaction to the db.  Pretty
@@ -217,7 +230,7 @@ func (nd *LitNode) SaveJusticeSig(comnum uint64, pkh [20]byte, txidsig [120]byte
 	})
 }
 
-func (nd *LitNode) LoadJusticeSig(comnum uint64, pkh [20]byte) (JusticeTx, error) {
+func (nd *LitNode) LoadJusticeSig(comnum uint64, pkh []byte) (JusticeTx, error) {
 	var txidsig JusticeTx
 
 	err := nd.LitDB.View(func(btx *bolt.Tx) error {
@@ -315,14 +328,23 @@ func (nd *LitNode) SyncWatch(qc *Qchan, watchPeer uint32) error {
 	// if watchUpTo isn't 2 behind the state number, there's nothing to send
 	// kindof confusing inequality: can't send state 0 info to watcher when at
 	// state 1.  State 0 needs special handling.
-	if qc.State.WatchUpTo+2 > qc.State.StateIdx || qc.State.StateIdx < 2 {
+	if qc.ChanState.Commitment.WatchUpTo+2 > qc.ChanState.Commitment.StateIdx || qc.ChanState.Commitment.StateIdx < 2 {
 		return fmt.Errorf("Channel at state %d, up to %d exported, nothing to do",
-			qc.State.StateIdx, qc.State.WatchUpTo)
+			qc.ChanState.Commitment.StateIdx, qc.ChanState.Commitment.WatchUpTo)
 	}
 	// send initial description if we haven't sent anything yet
-	if qc.State.WatchUpTo == 0 {
+	if qc.ChanState.Commitment.WatchUpTo == 0 {
+
+		// FIXME
+		wra20 := [20]byte{}
+		copy(wra20[:], qc.ChanState.WatchRefundAddr)
+		ohb33 := [33]byte{}
+		copy(ohb33[:], qc.ChanState.TheirHakdBase)
+		mhb33 := [33]byte{}
+		copy(mhb33[:], qc.ChanState.MyHakdBase)
+
 		desc := lnutil.NewWatchDescMsg(watchPeer, qc.Coin(),
-			qc.WatchRefundAdr, qc.Delay, consts.JusticeFee, qc.TheirHAKDBase, qc.MyHAKDBase)
+			wra20, qc.Delay, consts.JusticeFee, ohb33, mhb33)
 
 		nd.tmpSendLitMsg(desc)
 		// after sending description, must send at least states 0 and 1.
@@ -334,13 +356,13 @@ func (nd *LitNode) SyncWatch(qc *Qchan, watchPeer uint32) error {
 		if err != nil {
 			return err
 		}
-		qc.State.WatchUpTo = 1
+		qc.ChanState.Commitment.WatchUpTo = 1
 	}
 	// send messages to get up to 1 less than current state
-	for qc.State.WatchUpTo < qc.State.StateIdx-1 {
+	for qc.ChanState.Commitment.WatchUpTo < qc.ChanState.Commitment.StateIdx-1 {
 		// increment watchupto number
-		qc.State.WatchUpTo++
-		err := nd.SendWatchComMsg(qc, qc.State.WatchUpTo, watchPeer)
+		qc.ChanState.Commitment.WatchUpTo++
+		err := nd.SendWatchComMsg(qc, qc.ChanState.Commitment.WatchUpTo, watchPeer)
 		if err != nil {
 			return err
 		}
@@ -352,18 +374,22 @@ func (nd *LitNode) SyncWatch(qc *Qchan, watchPeer uint32) error {
 // send WatchComMsg generates and sends the ComMsg to a watchtower
 func (nd *LitNode) SendWatchComMsg(qc *Qchan, idx uint64, watchPeer uint32) error {
 	// retrieve the sig data from db
-	txidsig, err := nd.LoadJusticeSig(idx, qc.WatchRefundAdr)
+	txidsig, err := nd.LoadJusticeSig(idx, qc.ChanState.WatchRefundAddr)
 	if err != nil {
 		return err
 	}
 	// get the elkrem
-	elk, err := qc.ElkRcv.AtIndex(idx)
+	elk, err := qc.ChanState.ElkRcv.AtIndex(idx)
 	if err != nil {
 		return err
 	}
 
+	// FIXME
+	wra20 := [20]byte{}
+	copy(wra20[:], qc.ChanState.WatchRefundAddr)
+
 	comMsg := lnutil.NewComMsg(
-		watchPeer, qc.Coin(), qc.WatchRefundAdr, *elk, txidsig.Txid, txidsig.Sig)
+		watchPeer, qc.Coin(), wra20, *elk, txidsig.Txid, txidsig.Sig)
 
 	nd.tmpSendLitMsg(comMsg)
 	return err

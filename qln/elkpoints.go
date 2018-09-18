@@ -15,7 +15,7 @@ functions dealing with elkrem points and the elkrem structure
 // CurElkPointForThem makes the current state elkrem point to send out
 func (q *Qchan) N2ElkPointForThem() (p [33]byte, err error) {
 	// generate revocable elkrem point
-	return q.ElkPoint(false, q.State.StateIdx+2)
+	return q.ElkPoint(false, q.ChanState.Commitment.StateIdx+2)
 }
 
 // ElkPoint generates an elkrem Point.  "My" elkrem point is the point
@@ -26,11 +26,11 @@ func (q *Qchan) N2ElkPointForThem() (p [33]byte, err error) {
 // With delinearized aggregation, only one point is needed.  I'm pretty sure.
 func (q *Qchan) ElkPoint(mine bool, idx uint64) (p [33]byte, err error) {
 	// sanity check
-	if q == nil || q.ElkSnd == nil { // no sender
+	if q == nil || q.ChanState.ElkSnd == nil { // no sender
 		err = fmt.Errorf("can't access elkrem sender")
 		return
 	}
-	if mine && q.ElkRcv == nil { // no receiver
+	if mine && q.ChanState.ElkRcv == nil { // no receiver
 		err = fmt.Errorf("can't access elkrem receiver")
 		return
 	}
@@ -38,9 +38,9 @@ func (q *Qchan) ElkPoint(mine bool, idx uint64) (p [33]byte, err error) {
 	elk := new(chainhash.Hash)
 
 	if mine { // make mine based on receiver
-		elk, err = q.ElkRcv.AtIndex(idx)
+		elk, err = q.ChanState.ElkRcv.AtIndex(idx)
 	} else { // make theirs based on sender
-		elk, err = q.ElkSnd.AtIndex(idx)
+		elk, err = q.ChanState.ElkSnd.AtIndex(idx)
 	}
 	// elkrem problem, error out here
 	if err != nil {
@@ -59,11 +59,11 @@ func (q *Qchan) AdvanceElkrem(elk *chainhash.Hash, n2Elk [33]byte) error {
 	}
 	// if ingest was successful, update the stored elk points
 	// the already stored "next" point becomes the current point
-	q.State.ElkPoint = q.State.NextElkPoint
+	q.ChanState.Commitment.ElkPoint = q.ChanState.Commitment.NextElkPoint
 	// n+2 drops to n+1
-	q.State.NextElkPoint = q.State.N2ElkPoint
+	q.ChanState.Commitment.NextElkPoint = q.ChanState.Commitment.N2ElkPoint
 	// and the newly received point is n+2
-	q.State.N2ElkPoint = n2Elk
+	q.ChanState.Commitment.N2ElkPoint = n2Elk
 	return nil
 }
 
@@ -78,15 +78,15 @@ func (q *Qchan) IngestElkrem(elk *chainhash.Hash) error {
 
 	// first verify the elkrem insertion (this only performs checks 1/2 the time, so
 	// 1/2 the time it'll work even if the elkrem is invalid, oh well)
-	err := q.ElkRcv.AddNext(elk)
+	err := q.ChanState.ElkRcv.AddNext(elk)
 	if err != nil {
 		return err
 	}
-	logging.Infof("ingested hash, receiver now has up to %d\n", q.ElkRcv.UpTo())
+	logging.Infof("ingested hash, receiver now has up to %d\n", q.ChanState.ElkRcv.UpTo())
 
 	// if this is state 0, then we have elkrem 0 and we can stop here.
 	// there's nothing to revoke.
-	if q.State.StateIdx == 0 {
+	if q.ChanState.Commitment.StateIdx == 0 {
 		return nil
 	}
 
@@ -100,12 +100,12 @@ func (q *Qchan) IngestElkrem(elk *chainhash.Hash) error {
 	point := lnutil.ElkPointFromHash(elk)
 
 	// see if it matches previous elk point
-	if point != q.State.ElkPoint {
+	if point != q.ChanState.Commitment.ElkPoint {
 		logging.Errorf("elk1: %x\nelk2: %x\nelk3: %x\nngst: %x\n",
-			q.State.ElkPoint, q.State.NextElkPoint, q.State.N2ElkPoint, point)
+			q.ChanState.Commitment.ElkPoint, q.ChanState.Commitment.NextElkPoint, q.ChanState.Commitment.N2ElkPoint, point)
 		// didn't match, the whole channel is borked.
 		return fmt.Errorf("hash %x (index %d) fits tree but creates wrong elkpoint!",
-			elk[:8], q.State.StateIdx)
+			elk[:8], q.ChanState.Commitment.StateIdx)
 	}
 
 	return nil

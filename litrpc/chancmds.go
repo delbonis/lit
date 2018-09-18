@@ -23,13 +23,15 @@ type ChannelInfo struct {
 	PeerIdx, CIdx uint32
 	PeerID        string
 	Data          [32]byte
-	Pkh           [20]byte
+	Pkh           []byte
 	HTLCs         []HTLCInfo
 	LastUpdate    uint64
 }
+
 type ChannelListReply struct {
 	Channels []ChannelInfo
 }
+
 type HTLCInfo struct {
 	Idx            uint32
 	Incoming       bool
@@ -65,19 +67,19 @@ func (r *LitRPC) ChannelList(args ChanArgs, reply *ChannelListReply) error {
 	reply.Channels = make([]ChannelInfo, len(qcs))
 
 	for i, q := range qcs {
-		reply.Channels[i].OutPoint = q.Op.String()
+		reply.Channels[i].OutPoint = q.ChanState.Txo.Op.String()
 		reply.Channels[i].CoinType = q.Coin()
-		reply.Channels[i].Closed = q.CloseData.Closed
-		reply.Channels[i].Failed = q.State.Failed
-		reply.Channels[i].Capacity = q.Value
-		reply.Channels[i].MyBalance = q.State.MyAmt
-		reply.Channels[i].Height = q.Height
-		reply.Channels[i].StateNum = q.State.StateIdx
-		reply.Channels[i].PeerIdx = q.KeyGen.Step[3] & 0x7fffffff
-		reply.Channels[i].CIdx = q.KeyGen.Step[4] & 0x7fffffff
-		reply.Channels[i].Data = q.State.Data
-		reply.Channels[i].Pkh = q.WatchRefundAdr
-		for _, h := range q.State.HTLCs {
+		reply.Channels[i].Closed = q.ChanState.CloseData.Closed
+		reply.Channels[i].Failed = q.ChanState.Commitment.Failed
+		reply.Channels[i].Capacity = q.ChanState.Txo.Value
+		reply.Channels[i].MyBalance = q.ChanState.Commitment.MyAmt
+		reply.Channels[i].Height = q.ChanState.Txo.Height
+		reply.Channels[i].StateNum = q.ChanState.Commitment.StateIdx
+		reply.Channels[i].PeerIdx = q.Peer()
+		reply.Channels[i].CIdx = q.Idx()
+		reply.Channels[i].Data = q.ChanState.Commitment.Data
+		reply.Channels[i].Pkh = q.ChanState.WatchRefundAddr
+		for _, h := range q.ChanState.Commitment.HTLCs {
 			hi := HTLCInfo{
 				h.Idx,
 				h.Incoming,
@@ -94,8 +96,8 @@ func (r *LitRPC) ChannelList(args ChanArgs, reply *ChannelListReply) error {
 			reply.Channels[i].HTLCs = append(reply.Channels[i].HTLCs, hi)
 		}
 
-		if q.State.InProgHTLC != nil {
-			h := q.State.InProgHTLC
+		if q.ChanState.Commitment.InProgHTLC != nil {
+			h := q.ChanState.Commitment.InProgHTLC
 			hi := HTLCInfo{
 				h.Idx,
 				h.Incoming,
@@ -111,8 +113,8 @@ func (r *LitRPC) ChannelList(args ChanArgs, reply *ChannelListReply) error {
 			reply.Channels[i].HTLCs = append(reply.Channels[i].HTLCs, hi)
 		}
 
-		if q.State.CollidingHTLC != nil {
-			h := q.State.CollidingHTLC
+		if q.ChanState.Commitment.CollidingHTLC != nil {
+			h := q.ChanState.Commitment.CollidingHTLC
 			hi := HTLCInfo{
 				h.Idx,
 				h.Incoming,
@@ -127,7 +129,7 @@ func (r *LitRPC) ChannelList(args ChanArgs, reply *ChannelListReply) error {
 			}
 			reply.Channels[i].HTLCs = append(reply.Channels[i].HTLCs, hi)
 		}
-		reply.Channels[i].LastUpdate = q.LastUpdate
+		reply.Channels[i].LastUpdate = q.ChanState.LastUpdate
 	}
 	return nil
 }
@@ -358,7 +360,7 @@ func (r *LitRPC) Push(args PushArgs, reply *PushReply) error {
 		return err
 	}
 	// see if channel is closed and error early
-	if dummyqc.CloseData.Closed {
+	if dummyqc.ChanState.CloseData.Closed {
 		return fmt.Errorf("Can't push; channel %d closed", args.ChanIdx)
 	}
 
@@ -379,23 +381,23 @@ func (r *LitRPC) Push(args PushArgs, reply *PushReply) error {
 			dummyqc.Peer(), dummyqc.Idx())
 	}
 
-	logging.Infof("channel %s\n", qc.Op.String())
+	logging.Infof("channel %s\n", qc.ChanState.Txo.Op.String())
 
-	if qc.CloseData.Closed {
+	if qc.ChanState.CloseData.Closed {
 		return fmt.Errorf("Channel %d already closed by tx %s",
-			args.ChanIdx, qc.CloseData.CloseTxid.String())
+			args.ChanIdx, qc.ChanState.CloseData.CloseTxid.String())
 	}
 
 	// TODO this is a bad place to put it -- litRPC should be a thin layer
 	// to the Node.Func() calls.  For now though, set the height here...
-	qc.Height = dummyqc.Height
+	qc.ChanState.Txo.Height = dummyqc.ChanState.Txo.Height
 
 	err = r.Node.PushChannel(qc, uint32(args.Amt), args.Data)
 	if err != nil {
 		return err
 	}
 
-	reply.StateIndex = qc.State.StateIdx
+	reply.StateIndex = qc.ChanState.Commitment.StateIdx
 	return nil
 }
 
@@ -462,19 +464,19 @@ func (r *LitRPC) DumpPrivs(args NoArgs, reply *DumpReply) error {
 		if !ok {
 			logging.Errorf(
 				"Channel %s error - coin %d not connected; can't show keys",
-				qc.Op.String(), qc.Coin())
+				qc.ChanState.Txo.Op.String(), qc.Coin())
 			continue
 		}
 
 		var thisTxo PrivInfo
-		thisTxo.OutPoint = qc.Op.String()
-		thisTxo.Amt = qc.Value
-		thisTxo.Height = qc.Height
+		thisTxo.OutPoint = qc.ChanState.Txo.Op.String()
+		thisTxo.Amt = qc.ChanState.Txo.Value
+		thisTxo.Height = qc.ChanState.Txo.Height
 		thisTxo.CoinType = wal.Params().Name
 		thisTxo.Witty = true
-		thisTxo.PairKey = fmt.Sprintf("%x", qc.TheirPub)
+		thisTxo.PairKey = fmt.Sprintf("%x", qc.ChanState.TheirPub)
 
-		priv, err := wal.GetPriv(qc.KeyGen)
+		priv, err := wal.GetPriv(qc.ChanState.Txo.KeyGen)
 		if err != nil {
 			return err
 		}
@@ -547,7 +549,7 @@ func (r *LitRPC) AddHTLC(args AddHTLCArgs, reply *AddHTLCReply) error {
 		return err
 	}
 	// see if channel is closed and error early
-	if dummyqc.CloseData.Closed {
+	if dummyqc.ChanState.CloseData.Closed {
 		return fmt.Errorf("Can't push; channel %d closed", args.ChanIdx)
 	}
 
@@ -568,16 +570,16 @@ func (r *LitRPC) AddHTLC(args AddHTLCArgs, reply *AddHTLCReply) error {
 			dummyqc.Peer(), dummyqc.Idx())
 	}
 
-	logging.Infof("channel %s\n", qc.Op.String())
+	logging.Infof("channel %s\n", qc.ChanState.Txo.Op.String())
 
-	if qc.CloseData.Closed {
+	if qc.ChanState.CloseData.Closed {
 		return fmt.Errorf("Channel %d already closed by tx %s",
-			args.ChanIdx, qc.CloseData.CloseTxid.String())
+			args.ChanIdx, qc.ChanState.CloseData.CloseTxid.String())
 	}
 
 	// TODO this is a bad place to put it -- litRPC should be a thin layer
 	// to the Node.Func() calls.  For now though, set the height here...
-	qc.Height = dummyqc.Height
+	qc.ChanState.Txo.Height = dummyqc.ChanState.Txo.Height
 	curHeight := uint32(r.Node.SubWallet[qc.Coin()].CurrentHeight())
 	curHeight += args.LockTime
 
@@ -586,8 +588,8 @@ func (r *LitRPC) AddHTLC(args AddHTLCArgs, reply *AddHTLCReply) error {
 		return err
 	}
 
-	reply.StateIndex = qc.State.StateIdx
-	reply.HTLCIndex = qc.State.HTLCIdx - 1
+	reply.StateIndex = qc.ChanState.Commitment.StateIdx
+	reply.HTLCIndex = qc.ChanState.Commitment.HTLCIdx - 1
 	return nil
 }
 
@@ -611,7 +613,7 @@ func (r *LitRPC) ClearHTLC(args ClearHTLCArgs, reply *ClearHTLCReply) error {
 		return err
 	}
 	// see if channel is closed and error early
-	if dummyqc.CloseData.Closed {
+	if dummyqc.ChanState.CloseData.Closed {
 		return fmt.Errorf("Can't clear; channel %d closed", args.ChanIdx)
 	}
 
@@ -632,23 +634,23 @@ func (r *LitRPC) ClearHTLC(args ClearHTLCArgs, reply *ClearHTLCReply) error {
 			dummyqc.Peer(), dummyqc.Idx())
 	}
 
-	logging.Infof("channel %s\n", qc.Op.String())
+	logging.Infof("channel %s\n", qc.ChanState.Txo.Op.String())
 
-	if qc.CloseData.Closed {
+	if qc.ChanState.CloseData.Closed {
 		return fmt.Errorf("Channel %d already closed by tx %s",
-			args.ChanIdx, qc.CloseData.CloseTxid.String())
+			args.ChanIdx, qc.ChanState.CloseData.CloseTxid.String())
 	}
 
 	// TODO this is a bad place to put it -- litRPC should be a thin layer
 	// to the Node.Func() calls.  For now though, set the height here...
-	qc.Height = dummyqc.Height
+	qc.ChanState.Txo.Height = dummyqc.ChanState.Txo.Height
 
 	err = r.Node.ClearHTLC(qc, args.R, args.HTLCIdx, args.Data)
 	if err != nil {
 		return err
 	}
 
-	reply.StateIndex = qc.State.StateIdx
+	reply.StateIndex = qc.ChanState.Commitment.StateIdx
 	return nil
 }
 

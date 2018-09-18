@@ -354,8 +354,10 @@ func DlcOutput(pkPeer, pkOracleSig, pkOurs [33]byte, value int64) *wire.TxOut {
 func DlcCommitScript(pubKeyPeer, pubKeyOracleSig, ourPubKey [33]byte,
 	delay uint16) []byte {
 	// Combine pubKey and Oracle Sig
-	combinedPubKey := CombinePubs(pubKeyPeer, pubKeyOracleSig)
-	return CommitScript(combinedPubKey, ourPubKey, delay)
+	cpk33 := [33]byte{}
+	combinedPubKey := CombinePubs(pubKeyPeer[:], pubKeyOracleSig[:])
+	copy(cpk33[:], combinedPubKey) // FIXME
+	return CommitScript(cpk33, ourPubKey, delay)
 }
 
 // BigIntToEncodedBytes converts a big integer into its corresponding

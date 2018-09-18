@@ -20,36 +20,36 @@ func (nd *LitNode) BreakChannel(q *Qchan) error {
 		return err
 	}
 
-	if q.CloseData.Closed {
-		if q.CloseData.CloseHeight != 0 {
+	if q.ChanState.CloseData.Closed {
+		if q.ChanState.CloseData.CloseHeight != 0 {
 			return fmt.Errorf("Can't break channel %d with peer %d, already closed\n", q.Idx(), q.Peer())
 		}
 		return fmt.Errorf("Can't break channel %d with peer %d, tx already broadcast, wait for confirmation.\n", q.Idx(), q.Peer())
 	}
 
 	logging.Infof("breaking (%d,%d)\n", q.Peer(), q.Idx())
-	z, err := q.ElkSnd.AtIndex(0)
+	z, err := q.ChanState.ElkSnd.AtIndex(0)
 	if err != nil {
 		return err
 	}
 	logging.Infof("elk send 0: %s\n", z.String())
-	z, err = q.ElkRcv.AtIndex(0)
+	z, err = q.ChanState.ElkRcv.AtIndex(0)
 	if err != nil {
 		return err
 	}
 	logging.Infof("elk recv 0: %s\n", z.String())
 
 	// set delta to 0... needed for break
-	q.State.Delta = 0
+	q.ChanState.Commitment.Delta = 0
 
-	for i, h := range q.State.HTLCs {
+	for i, h := range q.ChanState.Commitment.HTLCs {
 		if !h.Cleared && h.Clearing {
-			q.State.HTLCs[i].Clearing = false
+			q.ChanState.Commitment.HTLCs[i].Clearing = false
 		}
 	}
 
-	q.State.InProgHTLC = nil
-	q.State.CollidingHTLC = nil
+	q.ChanState.Commitment.InProgHTLC = nil
+	q.ChanState.Commitment.CollidingHTLC = nil
 
 	tx, err := nd.SignBreakTx(q)
 	if err != nil {
@@ -69,23 +69,23 @@ func (nd *LitNode) BreakChannel(q *Qchan) error {
 	}
 	// set channel state to closed
 	nd.RemoteMtx.Lock()
-	q.CloseData.Closed = true
+	q.ChanState.CloseData.Closed = true
 	nd.RemoteMtx.Unlock()
-	q.CloseData.CloseTxid = tx.TxHash()
+	q.ChanState.CloseData.CloseTxid = tx.TxHash()
 	return nil
 }
 
 func (nd *LitNode) PrintBreakTxForDebugging(q *Qchan) error {
-	logging.Info("===== BUILDING Break TX for state [%d]:", q.State.StateIdx)
-	saveDelta := q.State.Delta
-	q.State.Delta = 0
+	logging.Info("===== BUILDING Break TX for state [%d]:", q.ChanState.Commitment.StateIdx)
+	saveDelta := q.ChanState.Commitment.Delta
+	q.ChanState.Commitment.Delta = 0
 	tx, err := nd.SignBreakTx(q)
-	q.State.Delta = saveDelta
+	q.ChanState.Commitment.Delta = saveDelta
 	if err != nil {
 		return err
 	}
-	logging.Info("===== DONE BUILDING Break TX for state [%d]:", q.State.StateIdx)
-	logging.Info("Break TX for state [%d]:", q.State.StateIdx)
+	logging.Info("===== DONE BUILDING Break TX for state [%d]:", q.ChanState.Commitment.StateIdx)
+	logging.Info("Break TX for state [%d]:", q.ChanState.Commitment.StateIdx)
 	lnutil.PrintTx(tx)
 	return nil
 }

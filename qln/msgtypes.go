@@ -75,7 +75,7 @@ func makeNeoOmniHandler(nd *LitNode) lnp2p.HandleFuncType {
 		if len(rawbuf) > 38 {
 			var opArr [36]byte
 			for _, q := range peer.QCs {
-				b := lnutil.OutPointToBytes(q.Op)
+				b := lnutil.OutPointToBytes(q.ChanState.Txo.Op)
 				peer.OpMap[b] = q.Idx()
 			}
 			copy(opArr[:], rawbuf[1:37]) // yay for magic numbers /s
