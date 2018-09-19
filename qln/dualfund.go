@@ -364,7 +364,8 @@ func (nd *LitNode) DualFundingAcceptHandler(msg lnutil.DualFundingAcceptMsg) {
 	nd.InProgDual.TheirHAKDBase = msg.OurHAKDBase
 
 	// make channel (not in db) just for keys / elk
-	q := NewEmptyQchan()
+	// FIXME Make this less awkward.
+	q := NewQchan(nd.InProgDual.ChanIdx, nd.InProgDual.PeerIdx, nd.InProgDual.CoinType)
 
 	txo := portxo.PorTxo{}
 	txo.Height = -1

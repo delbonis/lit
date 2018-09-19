@@ -391,6 +391,10 @@ func (q *Qchan) VerifySigs(sig [64]byte, HTLCSigs [][64]byte) error {
 		q.ChanState.Txo.Value-q.ChanState.Commitment.MyAmt)
 	logging.Infof("\tsig: %x\n", sig)
 
+	fmt.Printf("sig: %v\n", bigSig)
+	fmt.Printf("hash: %v\n", hash)
+	fmt.Printf("tpubk: %v\n", theirPubKey)
+
 	worked := pSig.Verify(hash, theirPubKey)
 	if !worked {
 		return fmt.Errorf("Invalid signature on chan %d state %d",

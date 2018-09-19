@@ -26,7 +26,7 @@ func (q *Qchan) N2ElkPointForThem() (p [33]byte, err error) {
 // With delinearized aggregation, only one point is needed.  I'm pretty sure.
 func (q *Qchan) ElkPoint(mine bool, idx uint64) (p [33]byte, err error) {
 	// sanity check
-	if q == nil || q.ChanState.ElkSnd == nil { // no sender
+	if q == nil || q.ChanState == nil || q.ChanState.ElkSnd == nil { // no sender
 		err = fmt.Errorf("can't access elkrem sender")
 		return
 	}

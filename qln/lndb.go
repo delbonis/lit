@@ -374,6 +374,15 @@ func (nd *LitNode) SaveQchanUtxoData(q *Qchan) error {
 // ReloadQchan loads updated data from the db into the qchan.  Preserves the
 // clear to send state, delay, and channel mutex.
 func (nd *LitNode) ReloadQchanState(q *Qchan) error {
+
+	if q == nil {
+		return fmt.Errorf("qchan is nil")
+	}
+
+	if q.ChanState == nil {
+		return fmt.Errorf("qchan state is nil")
+	}
+
 	opArr := lnutil.OutPointToBytes(q.ChanState.Txo.Op)
 
 	return nd.LitDB.View(func(btx *bolt.Tx) error {
@@ -449,7 +458,7 @@ func (nd *LitNode) GetAllQchans() ([]*Qchan, error) {
 // pubkey and outpoint bytes.
 func (nd *LitNode) GetQchan(opArr [36]byte) (*Qchan, error) {
 
-	qc := new(Qchan)
+	var qcs QchanState
 	var err error
 
 	err = nd.LitDB.View(func(btx *bolt.Tx) error {
@@ -463,7 +472,7 @@ func (nd *LitNode) GetQchan(opArr [36]byte) (*Qchan, error) {
 			return fmt.Errorf("channel not found")
 		}
 
-		err := json.Unmarshal(buf, qc)
+		err := json.Unmarshal(buf, &qcs)
 		if err != nil {
 			return err
 		}
@@ -473,7 +482,8 @@ func (nd *LitNode) GetQchan(opArr [36]byte) (*Qchan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return qc, nil
+
+	return NewQchanFromState(qcs), nil
 }
 
 func (nd *LitNode) GetQchanOPfromIdx(cIdx uint32) ([36]byte, error) {

@@ -143,10 +143,28 @@ type QCloseData struct {
 	Closed      bool           `json:"closed"` // if channel is closed; if CloseTxid != -1
 }
 
-func NewEmptyQchan() *Qchan {
+func NewQchan(cidx, pidx, ct uint32) *Qchan {
 	qc := new(Qchan)
 	qc.ChanState = new(QchanState)
 	qc.ChanState.Commitment = new(StatCom)
+	qc.ChanState.Commitment.ElkPoint = [33]byte{}
+	qc.ChanState.Commitment.NextElkPoint = [33]byte{}
+	qc.ChanState.Commitment.N2ElkPoint = [33]byte{}
+
+	// elkrems
+	elksroot := [32]byte{}
+	qc.ChanState.ElkSnd = elkrem.NewElkremSender(elksroot)
+	qc.ChanState.ElkRcv = elkrem.NewElkremReceiver()
+
+	// FIXME This is not a particularly good way to do this.  It should be dependent on the coin driver.
+	qc.ChanState.MyPub = make([]byte, 33)
+	qc.ChanState.TheirPub = make([]byte, 33)
+	qc.ChanState.MyRefundPub = make([]byte, 33)
+	qc.ChanState.TheirRefundPub = make([]byte, 33)
+	qc.ChanState.MyHakdBase = make([]byte, 33)
+	qc.ChanState.TheirHakdBase = make([]byte, 33)
+	qc.ChanState.WatchRefundAddr = make([]byte, 33)
+
 	return qc
 }
 

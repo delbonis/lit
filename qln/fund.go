@@ -279,7 +279,8 @@ func (nd *LitNode) PointRespHandler(msg lnutil.PointRespMsg) error {
 	}
 
 	// make channel (not in db) just for keys / elk
-	q := NewEmptyQchan()
+	// FIXME Make this less awkward.
+	q := NewQchan(nd.InProg.ChanIdx, nd.InProg.PeerIdx, nd.InProg.Coin)
 
 	q.ChanState.Txo.Height = -1
 
@@ -298,20 +299,20 @@ func (nd *LitNode) PointRespHandler(msg lnutil.PointRespMsg) error {
 	q.ChanState.ElkRcv = elkrem.NewElkremReceiver()
 
 	// chop up incoming message, save points to channel struct
-	copy(q.ChanState.TheirPub[:], msg.ChannelPub[:])
-	copy(q.ChanState.TheirRefundPub[:], msg.RefundPub[:])
-	copy(q.ChanState.TheirHakdBase[:], msg.HAKDbase[:])
+	copy(q.ChanState.TheirPub, msg.ChannelPub[:])
+	copy(q.ChanState.TheirRefundPub, msg.RefundPub[:])
+	copy(q.ChanState.TheirHakdBase, msg.HAKDbase[:])
 
 	// make sure their pubkeys are real pubkeys
-	_, err = koblitz.ParsePubKey(q.ChanState.TheirPub[:], koblitz.S256())
+	_, err = koblitz.ParsePubKey(q.ChanState.TheirPub, koblitz.S256())
 	if err != nil {
 		return fmt.Errorf("PubRespHandler TheirPub err %s", err.Error())
 	}
-	_, err = koblitz.ParsePubKey(q.ChanState.TheirRefundPub[:], koblitz.S256())
+	_, err = koblitz.ParsePubKey(q.ChanState.TheirRefundPub, koblitz.S256())
 	if err != nil {
 		return fmt.Errorf("PubRespHandler TheirRefundPub err %s", err.Error())
 	}
-	_, err = koblitz.ParsePubKey(q.ChanState.TheirHakdBase[:], koblitz.S256())
+	_, err = koblitz.ParsePubKey(q.ChanState.TheirHakdBase, koblitz.S256())
 	if err != nil {
 		return fmt.Errorf("PubRespHandler TheirHAKDBase err %s", err.Error())
 	}
@@ -456,7 +457,6 @@ func (nd *LitNode) QChanDescHandler(msg lnutil.ChanDescMsg) error {
 
 	// deserialize desc
 	op := msg.Outpoint
-	opArr := lnutil.OutPointToBytes(op)
 	amt := msg.Capacity
 
 	cIdx, err := nd.NextChannelIdx()
@@ -464,7 +464,8 @@ func (nd *LitNode) QChanDescHandler(msg lnutil.ChanDescMsg) error {
 		return fmt.Errorf("QChanDescHandler err %s", err.Error())
 	}
 
-	qc := new(Qchan)
+	// FIXME Make this less awkward.
+	qc := NewQchan(cIdx, msg.Peer(), msg.CoinType)
 
 	qc.ChanState.Txo.Height = -1
 	qc.ChanState.Txo.KeyGen.Depth = 5
@@ -550,40 +551,40 @@ func (nd *LitNode) QChanDescHandler(msg lnutil.ChanDescMsg) error {
 		logging.Errorf("QChanDescHandler err %s", err.Error())
 		return err
 	}
-
-	// load ... the thing I just saved.  why?
-	qc, err = nd.GetQchan(opArr)
-	if err != nil {
-		nd.FailChannel(qc)
-		logging.Errorf("QChanDescHandler GetQchan err %s", err.Error())
-		return err
-	}
-
+	/*
+		// load ... the thing I just saved.  why?
+		qc, err = nd.GetQchan(lnutil.OutPointToBytes(op))
+		if err != nil {
+			nd.FailChannel(qc)
+			logging.Errorf("QChanDescHandler GetQchan err %s", err.Error())
+			return err
+		}
+	*/
 	// when funding a channel, give them the first *2* elkpoints.
 	theirElkPointZero, err := qc.ElkPoint(false, 0)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanDescHandler err %s", err.Error())
+		nd.FailChannel(qc)
 		return err
 	}
 	theirElkPointOne, err := qc.ElkPoint(false, 1)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanDescHandler err %s", err.Error())
+		nd.FailChannel(qc)
 		return err
 	}
 
 	theirElkPointTwo, err := qc.N2ElkPointForThem()
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanDescHandler err %s", err.Error())
+		nd.FailChannel(qc)
 		return err
 	}
 
 	sig, _, err := nd.SignState(qc)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanDescHandler SignState err %s", err.Error())
+		nd.FailChannel(qc)
 		return err
 	}
 
@@ -608,8 +609,8 @@ func (nd *LitNode) QChanAckHandler(msg lnutil.ChanAckMsg, peer *RemotePeer) {
 	// load channel to save their refund address
 	qc, err := nd.GetQchan(opArr)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanAckHandler GetQchan err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
@@ -624,16 +625,16 @@ func (nd *LitNode) QChanAckHandler(msg lnutil.ChanAckMsg, peer *RemotePeer) {
 
 	err = qc.VerifySigs(sig, nil)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanAckHandler VerifySig err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
 	// verify worked; Save state 1 to DB
 	err = nd.SaveQchanState(qc)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanAckHandler SaveQchanState err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
@@ -642,23 +643,23 @@ func (nd *LitNode) QChanAckHandler(msg lnutil.ChanAckMsg, peer *RemotePeer) {
 	// sign their com tx to send
 	sig, _, err = nd.SignState(qc)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanAckHandler SignState err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
 	// OK to fund.
 	err = nd.SubWallet[qc.Coin()].ReallySend(&qc.ChanState.Txo.Op.Hash)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanAckHandler ReallySend err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
 	err = nd.SubWallet[qc.Coin()].WatchThis(qc.ChanState.Txo.Op)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("QChanAckHandler WatchThis err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
@@ -702,38 +703,38 @@ func (nd *LitNode) SigProofHandler(msg lnutil.SigProofMsg, peer *RemotePeer) {
 
 	qc, err := nd.GetQchan(opArr)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("SigProofHandler err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
 	wal, ok := nd.SubWallet[qc.Coin()]
 	if !ok {
-		nd.FailChannel(qc)
 		logging.Errorf("Not connected to coin type %d\n", qc.Coin())
+		nd.FailChannel(qc)
 		return
 	}
 
 	err = qc.VerifySigs(msg.Signature, nil)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("SigProofHandler err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
 	// sig OK, save
 	err = nd.SaveQchanState(qc)
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("SigProofHandler err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
 	err = wal.WatchThis(op)
 
 	if err != nil {
-		nd.FailChannel(qc)
 		logging.Errorf("SigProofHandler err %s", err.Error())
+		nd.FailChannel(qc)
 		return
 	}
 
