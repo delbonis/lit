@@ -54,18 +54,18 @@ func (cs *ChannelState) ApplyTransition(ops []ChannelOp) (*ChannelState, int, er
 		cur = next
 	}
 
-	return &cur, -1, nil
+	return cur, -1, nil
 
 }
 
 // Clone returns a new deep copy of this
-func (cs *ChannelState) Clone() ChannelState {
+func (cs *ChannelState) Clone() *ChannelState {
 	nparts := make([]ChannelPartition, len(cs.Partitions))
 	for i := range cs.Partitions {
 		nparts[i] = cs.Partitions[i].Clone()
 	}
 
-	return ChannelState{
+	return &ChannelState{
 		Num:        cs.Num,
 		Partitions: nparts,
 	}
@@ -100,10 +100,10 @@ type PartitionType interface {
 	Name() string
 
 	// Serialize takes some PartitionData and makes it into something on-disk.
-	Serialize(PartitionData) ([]byte, error)
+	Serialize(*PartitionData) ([]byte, error)
 
 	// Deserialize is the reverse of the above.
-	Deserialize([]byte) (PartitionData, error)
+	Deserialize([]byte) (*PartitionData, error)
 
 	// GenerateTxouts returns any/all txouts that should be made for this partition, might not be broadcast directly.
 	GenerateTxouts(PartitionData) ([]wire.TxOut, error)

@@ -12,5 +12,11 @@ type ChannelOp interface {
 	TypeName() string
 
 	// Apply takes a channel state and returns a new channel state with the operation applied to it.
-	Apply(ChannelState) (ChannelState, error)
+	// TODO Needs some external context here so that you can't make a "push" that takes a bunch of money from the other party.
+	Apply(*ChannelState) (*ChannelState, error)
+
+	// IsSecret is a flag if this operation shouldn't be told to the other party
+	// until actually signing the transaction, for things like applying
+	// preimages to channels to settle and HTLC.
+	IsSecret() bool
 }
