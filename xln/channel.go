@@ -26,7 +26,8 @@ type ChannelCtx struct {
 
 // ChannelState is the actual state used to derive signatures.
 type ChannelState struct {
-	Num        uint64
+	StateIdx   uint64 // state index
+	Inputs     []wire.OutPoint
 	Partitions []ChannelPartition
 }
 
@@ -65,8 +66,17 @@ func (cs *ChannelState) Clone() *ChannelState {
 		nparts[i] = cs.Partitions[i].Clone()
 	}
 
+	nins := make([]wire.OutPoint, len(cs.Inputs))
+	for i, op := range cs.Inputs {
+		nins[i] = wire.OutPoint{
+			Hash:  op.Hash,
+			Index: op.Index,
+		}
+	}
+
 	return &ChannelState{
-		Num:        cs.Num,
+		StateIdx:   cs.StateIdx,
+		Inputs:     nins,
 		Partitions: nparts,
 	}
 }
