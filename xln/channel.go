@@ -1,28 +1,8 @@
 package xln
 
 import (
-	"github.com/mit-dci/lit/crypto/koblitz"
-	"github.com/mit-dci/lit/lncore"
 	"github.com/mit-dci/lit/wire"
 )
-
-// ChannelCtx is all of the information needed for a channel to exist.
-type ChannelCtx struct {
-
-	// Ident is just some random identifier.
-	Ident string
-
-	// RootKey is the root key for addresses we use in this channel.
-	RootKey koblitz.PrivateKey
-
-	// CounterpartyAddr is the LN address of the remote peer.
-	CounterpartyAddr lncore.LnAddr
-
-	// RootState is the first-level channel information.
-	RootState ChannelState
-
-	// where should we store the root key?
-}
 
 // ChannelState is the actual state used to derive signatures.
 type ChannelState struct {
@@ -87,6 +67,9 @@ type ChannelPartition struct {
 	// Ident is just a unique identifier, like "p1bal"
 	Ident string
 
+	// Balance is "how much" is in the partition, measured in base units (sat).
+	Balance uint64
+
 	// Type is which type of partiton this is, like "refund" or "htlc".
 	Type string
 
@@ -97,9 +80,10 @@ type ChannelPartition struct {
 // Clone returns a new deep copy of this partition.
 func (cp *ChannelPartition) Clone() ChannelPartition {
 	return ChannelPartition{
-		Ident: cp.Ident,
-		Type:  cp.Type,
-		Data:  cp.Data.Clone(),
+		Ident:   cp.Ident,
+		Balance: cp.Balance,
+		Type:    cp.Type,
+		Data:    cp.Data.Clone(),
 	}
 }
 

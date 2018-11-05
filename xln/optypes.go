@@ -4,11 +4,16 @@ import (
 	"fmt"
 )
 
+const (
+	// OpTypePush is the push op type.
+	OpTypePush = "push"
+)
+
 type optypepush struct {
 }
 
 func (*optypepush) Name() string {
-	return "push"
+	return OpTypePush
 }
 
 type oppush struct {
@@ -16,21 +21,19 @@ type oppush struct {
 }
 
 func (*oppush) TypeName() string {
-	return "push"
+	return OpTypePush
 }
 
 func (op *oppush) Apply(state *ChannelState) (*ChannelState, error) {
 
 	s2 := state.Clone() // Make a copy of it, never modify the one passed in.
 
-	p1, ok := s2.GetPartition("p1bal").Data.(*partpeerbal)
-	if !ok {
-		return nil, fmt.Errorf("unknown partition layout")
-	}
+	p1 := s2.GetPartition("p1bal")
+	p2 := s2.GetPartition("p2bal")
 
-	p2, ok := s2.GetPartition("p2bal").Data.(*partpeerbal)
-	if !ok {
-		return nil, fmt.Errorf("unknown partition layout")
+	// Verify they're both just "plain balances".
+	if p1.Type != PartTypePeerBal || p2.Type != PartTypePeerBal {
+		return nil, fmt.Errorf("unknown partition format")
 	}
 
 	// Apply the balance change, hopefully this is how Go's aliasing works.

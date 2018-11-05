@@ -1,19 +1,24 @@
 package xln
 
+import (
+	"github.com/mit-dci/lit/lncore"
+)
+
+const (
+	// PartTypePeerBal is a peer balance.
+	PartTypePeerBal = "peerbal"
+)
+
 type partpeerbal struct {
-	Pubkey  []byte
-	Balance uint64
+	LnAddress lncore.LnAddr
 }
 
 func (*partpeerbal) TypeName() string {
-	return "peerbal"
+	return PartTypePeerBal
 }
 
 func (part *partpeerbal) Clone() PartitionData {
-	npk := make([]byte, len(part.Pubkey))
-	copy(npk, part.Pubkey)
 	return &partpeerbal{
-		Pubkey:  npk,
-		Balance: part.Balance,
+		LnAddress: part.LnAddress,
 	}
 }
